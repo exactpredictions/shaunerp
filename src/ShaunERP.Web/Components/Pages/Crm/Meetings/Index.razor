@@ -1,0 +1,58 @@
+@page "/crm/meetings"
+@attribute [Authorize]
+@inject ICrmService Crm
+
+<PageTitle>Meetings — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM</p>
+            <h1>Meetings</h1>
+        </div>
+        <a class="btn" href="/crm/meetings/new">Add meeting</a>
+    </header>
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (_items.Count == 0) { <p class="muted">No meetings yet.</p> }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Host</th>
+                        <th>From</th>
+                        <th>Location</th>
+                        <th>Type</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var x in _items)
+                    {
+                        <tr>
+                            <td>@(x.Title ?? "—")</td>
+                            <td>@(x.Host ?? "—")</td>
+                            <td>@(x.From?.ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
+                            <td>@(x.Location ?? "—")</td>
+                            <td>@(x.MeetingType ?? "—")</td>
+                            <td><a href="@($"/crm/meetings/{x.Id}")">Edit</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private List<Meeting> _items = new();
+    protected override async Task OnInitializedAsync()
+    {
+        _items = (await Crm.ListMeetingsAsync()).ToList();
+        _loading = false;
+    }
+}

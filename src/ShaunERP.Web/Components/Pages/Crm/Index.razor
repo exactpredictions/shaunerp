@@ -1,0 +1,91 @@
+@page "/crm"
+@attribute [Authorize]
+@inject ICrmService Crm
+@inject ITenantContext Tenant
+@inject IModuleRegistry Modules
+@inject ShellStateService Shell
+
+<PageTitle>CRM — ShaunERP</PageTitle>
+
+<section class="page">
+    <div class="breadcrumbs">
+        <a href="/">Home</a>
+        <span class="sep">/</span>
+        <span>CRM</span>
+    </div>
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">Enterprise CRM</p>
+            <h1>Sales workspace</h1>
+            <p class="muted">Pipeline, marketing, and service for @(Tenant.CompanyName ?? "your account").</p>
+        </div>
+        <div class="form-actions">
+            <a class="btn ghost" href="/crm/pipeline">Pipeline</a>
+            <a class="btn" href="/crm/leads/new">Add lead</a>
+        </div>
+    </header>
+
+    @if (!_allowed)
+    {
+        <div class="error-state">CRM is not licensed for this account or you lack permission.</div>
+    }
+    else if (_loading)
+    {
+        <div class="loading-state">Loading CRM dashboard…</div>
+    }
+    else if (_error is not null)
+    {
+        <div class="error-state">@_error</div>
+    }
+    else if (_stats is not null)
+    {
+        <div class="stat-grid crm-stats">
+            <a class="stat-card" href="/crm/leads"><strong>@_stats.Leads</strong><span>Leads</span></a>
+            <a class="stat-card" href="/crm/prospects"><strong>@_stats.Prospects</strong><span>Prospects</span></a>
+            <a class="stat-card" href="/crm/accounts"><strong>@_stats.Accounts</strong><span>Accounts</span></a>
+            <a class="stat-card" href="/crm/contacts"><strong>@_stats.Contacts</strong><span>Contacts</span></a>
+            <a class="stat-card" href="/crm/opportunities"><strong>@_stats.Opportunities</strong><span>Opportunities</span></a>
+            <a class="stat-card" href="/crm/customers"><strong>@_stats.Customers</strong><span>Customers</span></a>
+            <a class="stat-card" href="/crm/campaigns"><strong>@_stats.Campaigns</strong><span>Campaigns</span></a>
+            <a class="stat-card" href="/crm/cases"><strong>@_stats.OpenCases</strong><span>Open cases</span></a>
+            <a class="stat-card" href="/crm/tasks"><strong>@_stats.OpenTasks</strong><span>Open tasks</span></a>
+            <a class="stat-card" href="/crm/meetings"><strong>@_stats.UpcomingMeetings</strong><span>Meetings</span></a>
+            <a class="stat-card" href="/crm/calls"><strong>@_stats.CallsThisWeek</strong><span>Calls this week</span></a>
+            <div class="stat-card"><strong>@_stats.PipelineAmount.ToString("N0")</strong><span>Pipeline</span></div>
+            <div class="stat-card"><strong>@_stats.WeightedPipeline.ToString("N0")</strong><span>Weighted</span></div>
+            <a class="stat-card" href="/crm/forecast"><strong>@_stats.WonThisMonth.ToString("N0")</strong><span>Won this month</span></a>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private bool _allowed;
+    private string? _error;
+    private CrmDashboardStats? _stats;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Shell.InitializeAsync();
+        var crm = Modules.GetByKey(ModuleKeys.Crm);
+        _allowed = crm is not null && Modules.CanAccessModule(crm, Tenant);
+        if (!_allowed)
+        {
+            _loading = false;
+            return;
+        }
+
+        try
+        {
+            _stats = await Crm.GetDashboardAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

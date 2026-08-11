@@ -1,0 +1,45 @@
+@page "/roles"
+@attribute [Authorize]
+@inject IUserManagementService Users
+
+<PageTitle>Roles — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">User Management</p>
+            <h1>Roles</h1>
+        </div>
+    </header>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Role</th>
+                    <th>Description</th>
+                    <th>Scope</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _roles)
+                {
+                    <tr>
+                        <td>@r.Name</td>
+                        <td>@r.Description</td>
+                        <td>@(r.CompanyId is null ? "Global" : $"Company #{r.CompanyId}")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@code {
+    private List<RoleDto> _roles = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _roles = (await Users.ListRolesAsync()).ToList();
+    }
+}

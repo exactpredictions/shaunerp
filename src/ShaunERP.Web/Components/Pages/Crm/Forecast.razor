@@ -1,0 +1,72 @@
+@page "/crm/forecast"
+@attribute [Authorize]
+@inject ICrmService Crm
+
+<PageTitle>Forecast — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM</p>
+            <h1>Sales forecast</h1>
+            <p class="muted">Dynamics-style commit / best case / weighted pipeline.</p>
+        </div>
+        <a class="btn ghost" href="/crm/pipeline">Pipeline board</a>
+    </header>
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (_error is not null) { <div class="error-state">@_error</div> }
+    else if (_stats is not null)
+    {
+        <div class="stat-grid crm-stats">
+            <div class="stat-card"><strong>@_stats.OpenPipeline.ToString("N0")</strong><span>Open pipeline</span></div>
+            <div class="stat-card"><strong>@_stats.WeightedPipeline.ToString("N0")</strong><span>Weighted</span></div>
+            <div class="stat-card"><strong>@_stats.CommitAmount.ToString("N0")</strong><span>Commit</span></div>
+            <div class="stat-card"><strong>@_stats.BestCaseAmount.ToString("N0")</strong><span>Best case</span></div>
+            <div class="stat-card"><strong>@_stats.WonThisMonth.ToString("N0")</strong><span>Won this month</span></div>
+            <div class="stat-card"><strong>@_stats.LostThisMonth.ToString("N0")</strong><span>Lost this month</span></div>
+            <div class="stat-card"><strong>@_stats.OpenDeals</strong><span>Open deals</span></div>
+            <div class="stat-card"><strong>@_stats.WonDeals / @_stats.LostDeals</strong><span>Won / Lost (month)</span></div>
+        </div>
+
+        <div class="panel" style="margin-top:1rem">
+            <h2>By owner</h2>
+            @if (_stats.ByOwner.Count == 0)
+            {
+                <p class="muted">No open deals.</p>
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Owner</th><th>Deals</th><th>Amount</th><th>Weighted</th></tr></thead>
+                        <tbody>
+                            @foreach (var row in _stats.ByOwner)
+                            {
+                                <tr>
+                                    <td>@row.Owner</td>
+                                    <td>@row.Deals</td>
+                                    <td>@row.Amount.ToString("N0")</td>
+                                    <td>@row.Weighted.ToString("N0")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private CrmForecastStats? _stats;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _stats = await Crm.GetForecastAsync(); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+}

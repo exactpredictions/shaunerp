@@ -1,0 +1,43 @@
+@page "/crm/products"
+@attribute [Authorize]
+@inject ICrmService Crm
+
+<PageTitle>Products — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div><p class="eyebrow">CRM</p><h1>Products</h1></div>
+        <a class="btn" href="/crm/products/new">Add product</a>
+    </header>
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (_items.Count == 0) { <p class="muted">No products yet.</p> }
+    else
+    {
+        <div class="table-wrap"><table>
+            <thead><tr><th>Code</th><th>Name</th><th>Family</th><th>Price</th><th>Active</th><th></th></tr></thead>
+            <tbody>
+            @foreach (var x in _items)
+            {
+                <tr>
+                    <td>@x.ProductCode</td>
+                    <td>@x.Name</td>
+                    <td>@(x.ProductFamily ?? "—")</td>
+                    <td>@x.UnitPrice.ToString("N0") @(x.CurrencyCode)</td>
+                    <td><span class="pill @(x.IsActive ? "ok" : "off")">@(x.IsActive ? "Active" : "Inactive")</span></td>
+                    <td><a href="@($"/crm/products/{x.Id}")">Edit</a></td>
+                </tr>
+            }
+            </tbody>
+        </table></div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private List<CrmProduct> _items = new();
+    protected override async Task OnInitializedAsync()
+    {
+        _items = (await Crm.ListProductsAsync()).ToList();
+        _loading = false;
+    }
+}

@@ -1,0 +1,42 @@
+@page "/crm/notes"
+@attribute [Authorize]
+@inject ICrmService Crm
+
+<PageTitle>Notes — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div><p class="eyebrow">CRM · Activities</p><h1>Notes</h1></div>
+        <a class="btn" href="/crm/notes/new">Add note</a>
+    </header>
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (_items.Count == 0) { <p class="muted">No notes yet.</p> }
+    else
+    {
+        <div class="table-wrap"><table>
+            <thead><tr><th>Title</th><th>Related</th><th>Pinned</th><th>Owner</th><th></th></tr></thead>
+            <tbody>
+            @foreach (var x in _items)
+            {
+                <tr>
+                    <td>@x.Title</td>
+                    <td>@x.RelatedEntityType #@x.RelatedEntityId</td>
+                    <td>@(x.IsPinned ? "Yes" : "—")</td>
+                    <td>@(x.NoteOwner ?? "—")</td>
+                    <td><a href="@($"/crm/notes/{x.Id}")">Edit</a></td>
+                </tr>
+            }
+            </tbody>
+        </table></div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private List<CrmNote> _items = new();
+    protected override async Task OnInitializedAsync()
+    {
+        _items = (await Crm.ListNotesAsync()).ToList();
+        _loading = false;
+    }
+}

@@ -1,0 +1,186 @@
+@page "/crm/leads/new"
+@page "/crm/leads/{Id:int}"
+@attribute [Authorize]
+@inject ICrmService Crm
+@inject NavigationManager Nav
+
+<PageTitle>@(_isNew ? "Add lead" : "Edit lead") — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM · Leads</p>
+            <h1>@(_isNew ? "Add lead" : "Edit lead")</h1>
+        </div>
+        <a class="btn ghost" href="/crm/leads">Back</a>
+    </header>
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (!_isNew && _missing)
+    {
+        <p class="alert">Lead not found.</p>
+    }
+    else
+    {
+        <EditForm Model="_model" OnValidSubmit="SaveAsync" class="form-card form-wide">
+            @if (!string.IsNullOrEmpty(_error)) { <div class="alert">@_error</div> }
+            @if (!string.IsNullOrEmpty(_ok)) { <div class="ok-msg">@_ok</div> }
+
+            <h2 class="form-section">Basic information</h2>
+            <div class="form-grid">
+                <label>Lead owner <InputText @bind-Value="_model.LeadOwner" /></label>
+                <label>Title <InputText @bind-Value="_model.Title" /></label>
+                <label>First name <InputText @bind-Value="_model.FirstName" required /></label>
+                <label>Last name <InputText @bind-Value="_model.LastName" required /></label>
+                <label>Company <InputText @bind-Value="_model.CompanyName" /></label>
+                <label>Lead status
+                    <InputSelect @bind-Value="_model.LeadStatus">
+                        @foreach (var s in Statuses) { <option value="@s">@s</option> }
+                    </InputSelect>
+                </label>
+            </div>
+
+            <h2 class="form-section">Contact</h2>
+            <div class="form-grid">
+                <label>Phone <InputText @bind-Value="_model.Phone" /></label>
+                <label>Mobile <InputText @bind-Value="_model.Mobile" /></label>
+                <label>Email <InputText @bind-Value="_model.Email" /></label>
+                <label>Secondary email <InputText @bind-Value="_model.SecondaryEmail" /></label>
+                <label>Fax <InputText @bind-Value="_model.Fax" /></label>
+                <label>Website <InputText @bind-Value="_model.Website" /></label>
+            </div>
+
+            <h2 class="form-section">Lead details</h2>
+            <div class="form-grid">
+                <label>Lead source <InputText @bind-Value="_model.LeadSource" /></label>
+                <label>Industry <InputText @bind-Value="_model.Industry" /></label>
+                <label>Annual revenue <InputNumber @bind-Value="_model.AnnualRevenue" /></label>
+                <label>No. of employees <InputNumber @bind-Value="_model.NoOfEmployees" /></label>
+                <label>Rating
+                    <InputSelect @bind-Value="_model.Rating">
+                        <option value="">—</option>
+                        <option>Hot</option><option>Warm</option><option>Cold</option>
+                    </InputSelect>
+                </label>
+                <label>Score (0–100) <InputNumber @bind-Value="_model.Score" /></label>
+                <label>Territory <InputText @bind-Value="_model.Territory" /></label>
+                <label>Tags <InputText @bind-Value="_model.Tags" /></label>
+                <label>Preferred contact <InputText @bind-Value="_model.PreferredContactMethod" /></label>
+                <label>Gender <InputText @bind-Value="_model.Gender" /></label>
+                <label>Language <InputText @bind-Value="_model.Language" /></label>
+                <label class="check"><InputCheckbox @bind-Value="_model.EmailOptOut" /> Email opt-out</label>
+                <label class="check"><InputCheckbox @bind-Value="_model.IsQualified" /> Qualified</label>
+            </div>
+
+            <h2 class="form-section">Social &amp; address</h2>
+            <div class="form-grid">
+                <label>Skype ID <InputText @bind-Value="_model.SkypeId" /></label>
+                <label>Twitter <InputText @bind-Value="_model.Twitter" /></label>
+                <label>Street <InputText @bind-Value="_model.Street" /></label>
+                <label>City <InputText @bind-Value="_model.City" /></label>
+                <label>State <InputText @bind-Value="_model.State" /></label>
+                <label>Zip <InputText @bind-Value="_model.ZipCode" /></label>
+                <label>Country <InputText @bind-Value="_model.Country" /></label>
+            </div>
+
+            <label>Description <InputTextArea @bind-Value="_model.Description" rows="3" /></label>
+
+            <div class="form-actions">
+                <button class="btn" type="submit">@(_isNew ? "Create lead" : "Save changes")</button>
+                @if (!_isNew)
+                {
+                    <button class="btn" type="button" @onclick="FullConvertAsync">Convert (account + contact + prospect)</button>
+                    <button class="btn ghost" type="button" @onclick="ConvertAsync">Convert to prospect only</button>
+                    <button class="btn ghost danger" type="button" @onclick="DeleteAsync">Delete</button>
+                }
+            </div>
+        </EditForm>
+    }
+</section>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private static readonly string[] Statuses = ["New", "Contacted", "Qualified", "Unqualified", "Lost"];
+
+    private bool _isNew;
+    private bool _loading = true;
+    private bool _missing;
+    private Lead _model = new() { LeadStatus = "New" };
+    private string? _error;
+    private string? _ok;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _error = null;
+        _ok = null;
+        _missing = false;
+        _isNew = Nav.ToBaseRelativePath(Nav.Uri).Contains("leads/new", StringComparison.OrdinalIgnoreCase);
+
+        if (_isNew)
+        {
+            _model = new Lead { LeadStatus = "New", LeadOwner = "admin" };
+            _loading = false;
+            return;
+        }
+
+        var lead = await Crm.GetLeadAsync(Id);
+        if (lead is null)
+        {
+            _missing = true;
+            _loading = false;
+            return;
+        }
+
+        _model = lead;
+        _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        _ok = null;
+        if (_isNew)
+        {
+            var created = await Crm.CreateLeadAsync(_model);
+            Nav.NavigateTo($"/crm/leads/{created.Id}");
+            return;
+        }
+
+        var updated = await Crm.UpdateLeadAsync(Id, _model);
+        if (updated is null) { _error = "Lead not found."; return; }
+        _model = updated;
+        _ok = "Saved.";
+    }
+
+    private async Task ConvertAsync()
+    {
+        _error = null;
+        var (ok, error, prospect) = await Crm.ConvertLeadToProspectAsync(Id);
+        if (!ok) { _error = error; return; }
+        Nav.NavigateTo($"/crm/prospects/{prospect!.Id}");
+    }
+
+    private async Task FullConvertAsync()
+    {
+        _error = null;
+        var (ok, error, result) = await Crm.ConvertLeadAsync(Id, new LeadConversionRequest(
+            CreateProspect: true, CreateAccount: true, CreateContact: true, CreateOpportunity: true,
+            OpportunityName: $"{_model.CompanyName ?? "Deal"} — New opportunity",
+            OpportunityAmount: 0));
+        if (!ok) { _error = error; return; }
+        if (result?.Account is not null) Nav.NavigateTo($"/crm/accounts/{result.Account.Id}");
+        else if (result?.Prospect is not null) Nav.NavigateTo($"/crm/prospects/{result.Prospect.Id}");
+        else _ok = "Lead converted.";
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (!await Crm.DeleteLeadAsync(Id)) { _error = "Delete failed."; return; }
+        Nav.NavigateTo("/crm/leads");
+    }
+}

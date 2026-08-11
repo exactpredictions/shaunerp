@@ -1,0 +1,170 @@
+@page "/users/{Id:int}"
+@attribute [Authorize]
+@inject IUserManagementService Users
+@inject NavigationManager Nav
+@using Microsoft.EntityFrameworkCore
+@inject ShaunERP.Infrastructure.Persistence.ShaunErpDbContext Db
+
+<PageTitle>Edit user — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">User Management</p>
+            <h1>Edit user</h1>
+        </div>
+        <a class="btn ghost" href="/users">Back</a>
+    </header>
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_model is null)
+    {
+        <p class="alert">User not found.</p>
+    }
+    else
+    {
+        <EditForm Model="_model" OnValidSubmit="SaveAsync" class="form-card">
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert">@_error</div>
+            }
+            @if (!string.IsNullOrEmpty(_ok))
+            {
+                <div class="ok-msg">@_ok</div>
+            }
+
+            <div class="form-grid">
+                <label>Username <input value="@_username" disabled /></label>
+                <label>First name <InputText @bind-Value="_model.FirstName" required /></label>
+                <label>Last name <InputText @bind-Value="_model.LastName" required /></label>
+                <label>Email <InputText @bind-Value="_model.Email" required /></label>
+                <label>Phone <InputText @bind-Value="_model.PhoneNumber" /></label>
+                <label>Company
+                    <InputSelect @bind-Value="_model.CompanyId">
+                        @foreach (var c in _companies)
+                        {
+                            <option value="@c.Id">@c.Name</option>
+                        }
+                    </InputSelect>
+                </label>
+                <label>Role
+                    <InputSelect @bind-Value="_model.RoleName">
+                        @foreach (var r in _roles)
+                        {
+                            <option value="@r.Name">@r.Name</option>
+                        }
+                    </InputSelect>
+                </label>
+                <label class="check"><InputCheckbox @bind-Value="_model.IsActive" /> Active</label>
+            </div>
+            <button class="btn" type="submit">Save changes</button>
+        </EditForm>
+
+        <EditForm Model="_password" OnValidSubmit="ResetPasswordAsync" class="form-card" style="margin-top:1rem">
+            <h2>Reset password</h2>
+            <label>New password <InputText type="password" @bind-Value="_password.NewPassword" required /></label>
+            <button class="btn ghost" type="submit">Update password</button>
+        </EditForm>
+    }
+</section>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool _loading = true;
+    private string? _username;
+    private string? _error;
+    private string? _ok;
+    private EditFormModel? _model;
+    private readonly PasswordForm _password = new();
+    private List<(int Id, string Name)> _companies = new();
+    private List<RoleDto> _roles = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _companies = await Db.Companies.AsNoTracking()
+            .OrderBy(c => c.Name)
+            .Select(c => new ValueTuple<int, string>(c.Id, c.Name))
+            .ToListAsync();
+
+        var user = await Users.GetUserAsync(Id);
+        if (user is null)
+        {
+            _loading = false;
+            return;
+        }
+
+        _username = user.Username;
+        _model = new EditFormModel
+        {
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            Email = user.Email,
+            PhoneNumber = user.PhoneNumber,
+            IsActive = user.IsActive,
+            CompanyId = _companies.FirstOrDefault().Id,
+            RoleName = user.Roles.FirstOrDefault() ?? "User"
+        };
+
+        _roles = (await Users.ListRolesAsync(_model.CompanyId)).ToList();
+        _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_model is null) return;
+        _error = null;
+        _ok = null;
+
+        var (ok, error, _) = await Users.UpdateUserAsync(Id, new UpdateUserRequest(
+            _model.FirstName,
+            _model.LastName,
+            _model.Email,
+            _model.PhoneNumber,
+            _model.IsActive,
+            _model.CompanyId,
+            _model.RoleName));
+
+        if (!ok)
+        {
+            _error = error;
+            return;
+        }
+
+        _ok = "Saved.";
+    }
+
+    private async Task ResetPasswordAsync()
+    {
+        _error = null;
+        _ok = null;
+        var (ok, error) = await Users.ResetPasswordAsync(Id, new ResetPasswordRequest(_password.NewPassword));
+        if (!ok)
+        {
+            _error = error;
+            return;
+        }
+
+        _ok = "Password updated.";
+        _password.NewPassword = "";
+    }
+
+    private sealed class EditFormModel
+    {
+        public string FirstName { get; set; } = "";
+        public string LastName { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string? PhoneNumber { get; set; }
+        public bool IsActive { get; set; }
+        public int? CompanyId { get; set; }
+        public string RoleName { get; set; } = "User";
+    }
+
+    private sealed class PasswordForm
+    {
+        public string NewPassword { get; set; } = "";
+    }
+}

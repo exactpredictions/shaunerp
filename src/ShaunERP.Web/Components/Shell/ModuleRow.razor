@@ -1,0 +1,22 @@
+@using ShaunERP.Core.Platform
+
+<button type="button" class="module-item @(Active ? "active" : null)" @onclick="() => OnSelect.InvokeAsync(Module.Key)">
+    <span>
+        <div class="title">@Module.Name</div>
+        <div class="desc">@Module.Description</div>
+    </span>
+    <span>
+        <button type="button" class="fav-btn @(Favourite ? "on" : null)" title="Favourite"
+                @onclick="HandleFavourite" @onclick:stopPropagation="true">★</button>
+    </span>
+</button>
+
+@code {
+    [Parameter, EditorRequired] public ModuleDefinition Module { get; set; } = default!;
+    [Parameter] public bool Active { get; set; }
+    [Parameter] public bool Favourite { get; set; }
+    [Parameter] public EventCallback<string> OnSelect { get; set; }
+    [Parameter] public EventCallback<string> OnFavourite { get; set; }
+
+    private async Task HandleFavourite() => await OnFavourite.InvokeAsync(Module.Key);
+}

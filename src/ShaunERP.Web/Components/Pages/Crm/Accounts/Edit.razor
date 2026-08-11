@@ -1,0 +1,110 @@
+@page "/crm/accounts/new"
+@page "/crm/accounts/{Id:int}"
+@attribute [Authorize]
+@inject ICrmService Crm
+@inject NavigationManager Nav
+
+<PageTitle>@(_isNew ? "Add account" : "Edit account") — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM · Accounts</p>
+            <h1>@(_isNew ? "Add account" : "Edit account")</h1>
+        </div>
+        <a class="btn ghost" href="/crm/accounts">Back</a>
+    </header>
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (!_isNew && _missing) { <p class="alert">Account not found.</p> }
+    else
+    {
+        <EditForm Model="_model" OnValidSubmit="SaveAsync" class="form-card form-wide">
+            @if (!string.IsNullOrEmpty(_error)) { <div class="alert">@_error</div> }
+            @if (!string.IsNullOrEmpty(_ok)) { <div class="ok-msg">@_ok</div> }
+
+            <h2 class="form-section">Account details</h2>
+            <div class="form-grid">
+                <label>Account name <InputText @bind-Value="_model.AccountName" required /></label>
+                <label>Account number <InputText @bind-Value="_model.AccountNumber" /></label>
+                <label>Owner <InputText @bind-Value="_model.AccountOwner" /></label>
+                <label>Type
+                    <InputSelect @bind-Value="_model.AccountType">
+                        <option>Customer</option><option>Prospect</option><option>Partner</option><option>Competitor</option><option>Other</option>
+                    </InputSelect>
+                </label>
+                <label>Industry <InputText @bind-Value="_model.Industry" /></label>
+                <label>Website <InputText @bind-Value="_model.Website" /></label>
+                <label>Phone <InputText @bind-Value="_model.Phone" /></label>
+                <label>Email <InputText @bind-Value="_model.Email" /></label>
+                <label>Rating
+                    <InputSelect @bind-Value="_model.Rating">
+                        <option value="">—</option><option>Hot</option><option>Warm</option><option>Cold</option>
+                    </InputSelect>
+                </label>
+                <label>Territory <InputText @bind-Value="_model.Territory" /></label>
+                <label>Employees <InputNumber @bind-Value="_model.Employees" /></label>
+                <label>Annual revenue <InputNumber @bind-Value="_model.AnnualRevenue" /></label>
+                <label>Tax ID <InputText @bind-Value="_model.TaxId" /></label>
+                <label>Payment terms <InputText @bind-Value="_model.PaymentTerms" /></label>
+                <label>Credit limit <InputNumber @bind-Value="_model.CreditLimit" /></label>
+                <label>Tags <InputText @bind-Value="_model.Tags" /></label>
+            </div>
+
+            <h2 class="form-section">Billing address</h2>
+            <div class="form-grid">
+                <label>Street <InputText @bind-Value="_model.BillingStreet" /></label>
+                <label>City <InputText @bind-Value="_model.BillingCity" /></label>
+                <label>State <InputText @bind-Value="_model.BillingState" /></label>
+                <label>Zip <InputText @bind-Value="_model.BillingZip" /></label>
+                <label>Country <InputText @bind-Value="_model.BillingCountry" /></label>
+            </div>
+
+            <label>Description <InputTextArea @bind-Value="_model.Description" rows="3" /></label>
+
+            <div class="form-actions">
+                <button class="btn" type="submit">@(_isNew ? "Create account" : "Save changes")</button>
+                @if (!_isNew)
+                {
+                    <button class="btn ghost danger" type="button" @onclick="DeleteAsync">Delete</button>
+                }
+            </div>
+        </EditForm>
+    }
+</section>
+
+@code {
+    [Parameter] public int Id { get; set; }
+    private bool _isNew, _loading = true, _missing;
+    private Account _model = new() { AccountType = "Customer" };
+    private string? _error, _ok;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true; _error = null; _ok = null; _missing = false;
+        _isNew = Nav.ToBaseRelativePath(Nav.Uri).Contains("accounts/new", StringComparison.OrdinalIgnoreCase);
+        if (_isNew)
+        {
+            _model = new Account { AccountType = "Customer", AccountOwner = "admin", PaymentTerms = "Net 30" };
+            _loading = false; return;
+        }
+        var row = await Crm.GetAccountAsync(Id);
+        if (row is null) { _missing = true; _loading = false; return; }
+        _model = row; _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null; _ok = null;
+        if (_isNew) { var created = await Crm.CreateAccountAsync(_model); Nav.NavigateTo($"/crm/accounts/{created.Id}"); return; }
+        var updated = await Crm.UpdateAccountAsync(Id, _model);
+        if (updated is null) { _error = "Not found."; return; }
+        _model = updated; _ok = "Saved.";
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (await Crm.DeleteAccountAsync(Id)) Nav.NavigateTo("/crm/accounts");
+        else _error = "Delete failed.";
+    }
+}

@@ -1,0 +1,75 @@
+@page "/crm/notes/new"
+@page "/crm/notes/{Id:int}"
+@attribute [Authorize]
+@inject ICrmService Crm
+@inject NavigationManager Nav
+
+<PageTitle>@(_isNew ? "Add note" : "Edit note") — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div><p class="eyebrow">CRM · Notes</p><h1>@(_isNew ? "Add note" : "Edit note")</h1></div>
+        <a class="btn ghost" href="/crm/notes">Back</a>
+    </header>
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (!_isNew && _missing) { <p class="alert">Not found.</p> }
+    else
+    {
+        <EditForm Model="_model" OnValidSubmit="SaveAsync" class="form-card form-wide">
+            @if (!string.IsNullOrEmpty(_error)) { <div class="alert">@_error</div> }
+            @if (!string.IsNullOrEmpty(_ok)) { <div class="ok-msg">@_ok</div> }
+            <div class="form-grid">
+                <label>Title <InputText @bind-Value="_model.Title" required /></label>
+                <label>Owner <InputText @bind-Value="_model.NoteOwner" /></label>
+                <label>Related type
+                    <InputSelect @bind-Value="_model.RelatedEntityType">
+                        @foreach (var t in CrmRelatedTypes.All) { <option value="@t">@t</option> }
+                    </InputSelect>
+                </label>
+                <label>Related ID <InputNumber @bind-Value="_model.RelatedEntityId" /></label>
+                <label class="check"><InputCheckbox @bind-Value="_model.IsPinned" /> Pinned</label>
+            </div>
+            <label>Body <InputTextArea @bind-Value="_model.Body" rows="5" /></label>
+            <div class="form-actions">
+                <button class="btn" type="submit">@(_isNew ? "Create" : "Save")</button>
+                @if (!_isNew) { <button class="btn ghost danger" type="button" @onclick="DeleteAsync">Delete</button> }
+            </div>
+        </EditForm>
+    }
+</section>
+
+@code {
+    [Parameter] public int Id { get; set; }
+    private bool _isNew, _loading = true, _missing;
+    private CrmNote _model = new() { RelatedEntityType = CrmRelatedTypes.Lead };
+    private string? _error, _ok;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true; _error = null; _ok = null; _missing = false;
+        _isNew = Nav.ToBaseRelativePath(Nav.Uri).Contains("notes/new", StringComparison.OrdinalIgnoreCase);
+        if (_isNew)
+        {
+            _model = new CrmNote { NoteOwner = "admin", RelatedEntityType = CrmRelatedTypes.Lead };
+            _loading = false; return;
+        }
+        var row = await Crm.GetNoteAsync(Id);
+        if (row is null) { _missing = true; _loading = false; return; }
+        _model = row; _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null; _ok = null;
+        if (_isNew) { var c = await Crm.CreateNoteAsync(_model); Nav.NavigateTo($"/crm/notes/{c.Id}"); return; }
+        var u = await Crm.UpdateNoteAsync(Id, _model);
+        if (u is null) { _error = "Not found."; return; }
+        _model = u; _ok = "Saved.";
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (await Crm.DeleteNoteAsync(Id)) Nav.NavigateTo("/crm/notes");
+        else _error = "Delete failed.";
+    }
+}

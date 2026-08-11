@@ -1,0 +1,106 @@
+@page "/crm/quotes/new"
+@page "/crm/quotes/{Id:int}"
+@attribute [Authorize]
+@inject ICrmService Crm
+@inject NavigationManager Nav
+
+<PageTitle>@(_isNew ? "Add quote" : "Edit quote") — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div><p class="eyebrow">CRM · Quotes</p><h1>@(_isNew ? "Add quote" : "Edit quote")</h1></div>
+        <a class="btn ghost" href="/crm/quotes">Back</a>
+    </header>
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (!_isNew && _missing) { <p class="alert">Not found.</p> }
+    else
+    {
+        <EditForm Model="_model" OnValidSubmit="SaveAsync" class="form-card form-wide">
+            @if (!string.IsNullOrEmpty(_error)) { <div class="alert">@_error</div> }
+            @if (!string.IsNullOrEmpty(_ok)) { <div class="ok-msg">@_ok</div> }
+            <div class="form-grid">
+                <label>Quote number <InputText @bind-Value="_model.QuoteNumber" /></label>
+                <label>Subject <InputText @bind-Value="_model.Subject" required /></label>
+                <label>Owner <InputText @bind-Value="_model.QuoteOwner" /></label>
+                <label>Stage
+                    <InputSelect @bind-Value="_model.QuoteStage">
+                        <option>Draft</option><option>In Review</option><option>Presented</option>
+                        <option>Accepted</option><option>Rejected</option><option>Expired</option>
+                    </InputSelect>
+                </label>
+                <label>Account name <InputText @bind-Value="_model.AccountName" /></label>
+                <label>Contact name <InputText @bind-Value="_model.ContactName" /></label>
+                <label>Valid until <InputDate @bind-Value="_model.ValidUntil" /></label>
+                <label>Currency <InputText @bind-Value="_model.CurrencyCode" /></label>
+                <label>Discount <InputNumber @bind-Value="_model.Discount" /></label>
+                <label>Tax <InputNumber @bind-Value="_model.Tax" /></label>
+            </div>
+
+            <h2 class="form-section">Line items</h2>
+            @for (var i = 0; i < _lines.Count; i++)
+            {
+                var idx = i;
+                <div class="form-grid">
+                    <label>Product <InputText @bind-Value="_lines[idx].ProductName" /></label>
+                    <label>Qty <InputNumber @bind-Value="_lines[idx].Quantity" /></label>
+                    <label>Unit price <InputNumber @bind-Value="_lines[idx].UnitPrice" /></label>
+                    <label>Discount <InputNumber @bind-Value="_lines[idx].Discount" /></label>
+                </div>
+            }
+            <button class="btn ghost" type="button" @onclick="AddLine">Add line</button>
+
+            <label style="margin-top:1rem">Terms <InputTextArea @bind-Value="_model.Terms" rows="2" /></label>
+            <label>Description <InputTextArea @bind-Value="_model.Description" rows="2" /></label>
+
+            <div class="form-actions">
+                <button class="btn" type="submit">@(_isNew ? "Create" : "Save")</button>
+                @if (!_isNew) { <button class="btn ghost danger" type="button" @onclick="DeleteAsync">Delete</button> }
+            </div>
+        </EditForm>
+    }
+</section>
+
+@code {
+    [Parameter] public int Id { get; set; }
+    private bool _isNew, _loading = true, _missing;
+    private Quote _model = new() { QuoteStage = "Draft", CurrencyCode = "INR" };
+    private List<QuoteLine> _lines = [new() { Quantity = 1 }];
+    private string? _error, _ok;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true; _error = null; _ok = null; _missing = false;
+        _isNew = Nav.ToBaseRelativePath(Nav.Uri).Contains("quotes/new", StringComparison.OrdinalIgnoreCase);
+        if (_isNew)
+        {
+            _model = new Quote { QuoteOwner = "admin", QuoteStage = "Draft", CurrencyCode = "INR", ValidUntil = DateTime.UtcNow.AddDays(30) };
+            _lines = [new QuoteLine { Quantity = 1 }];
+            _loading = false; return;
+        }
+        var row = await Crm.GetQuoteAsync(Id);
+        if (row is null) { _missing = true; _loading = false; return; }
+        _model = row;
+        _lines = row.Lines?.ToList() ?? [new QuoteLine { Quantity = 1 }];
+        _loading = false;
+    }
+
+    private void AddLine() => _lines.Add(new QuoteLine { Quantity = 1, SortOrder = _lines.Count });
+
+    private async Task SaveAsync()
+    {
+        _error = null; _ok = null;
+        _model.Lines = _lines;
+        if (_isNew) { var c = await Crm.CreateQuoteAsync(_model); Nav.NavigateTo($"/crm/quotes/{c.Id}"); return; }
+        var u = await Crm.UpdateQuoteAsync(Id, _model);
+        if (u is null) { _error = "Not found."; return; }
+        _model = u;
+        _lines = u.Lines?.ToList() ?? _lines;
+        _ok = "Saved.";
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (await Crm.DeleteQuoteAsync(Id)) Nav.NavigateTo("/crm/quotes");
+        else _error = "Delete failed.";
+    }
+}

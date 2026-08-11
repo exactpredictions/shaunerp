@@ -1,0 +1,43 @@
+@page "/crm/calls"
+@attribute [Authorize]
+@inject ICrmService Crm
+
+<PageTitle>Calls — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div><p class="eyebrow">CRM · Activities</p><h1>Calls</h1></div>
+        <a class="btn" href="/crm/calls/new">Log call</a>
+    </header>
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (_items.Count == 0) { <p class="muted">No calls logged.</p> }
+    else
+    {
+        <div class="table-wrap"><table>
+            <thead><tr><th>Subject</th><th>Type</th><th>Contact</th><th>When</th><th>Result</th><th></th></tr></thead>
+            <tbody>
+            @foreach (var x in _items)
+            {
+                <tr>
+                    <td>@x.Subject</td>
+                    <td>@(x.CallType ?? "—")</td>
+                    <td>@(x.ContactName ?? "—")</td>
+                    <td>@(x.CallStart?.ToString("g") ?? "—")</td>
+                    <td>@(x.CallResult ?? "—")</td>
+                    <td><a href="@($"/crm/calls/{x.Id}")">Edit</a></td>
+                </tr>
+            }
+            </tbody>
+        </table></div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private List<CrmCall> _items = new();
+    protected override async Task OnInitializedAsync()
+    {
+        _items = (await Crm.ListCallsAsync()).ToList();
+        _loading = false;
+    }
+}

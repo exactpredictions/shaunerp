@@ -1,0 +1,76 @@
+@page "/crm/prospects/new"
+@page "/crm/prospects/{Id:int}"
+@attribute [Authorize]
+@inject ICrmService Crm
+@inject NavigationManager Nav
+
+<PageTitle>@(_isNew ? "Add prospect" : "Edit prospect") — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM · Prospects</p>
+            <h1>@(_isNew ? "Add prospect" : "Edit prospect")</h1>
+        </div>
+        <a class="btn ghost" href="/crm/prospects">Back</a>
+    </header>
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (!_isNew && _missing) { <p class="alert">Prospect not found.</p> }
+    else
+    {
+        <EditForm Model="_model" OnValidSubmit="SaveAsync" class="form-card form-wide">
+            @if (!string.IsNullOrEmpty(_error)) { <div class="alert">@_error</div> }
+            @if (!string.IsNullOrEmpty(_ok)) { <div class="ok-msg">@_ok</div> }
+
+            <div class="form-grid">
+                <label>Company name <InputText @bind-Value="_model.CompanyName" required /></label>
+                <label>Lead ID <InputNumber @bind-Value="_model.LeadId" /></label>
+                <label>First name <InputText @bind-Value="_model.FirstName" required /></label>
+                <label>Last name <InputText @bind-Value="_model.LastName" required /></label>
+                <label>Email <InputText @bind-Value="_model.Email" /></label>
+                <label>Phone <InputText @bind-Value="_model.PhoneNumber" /></label>
+            </div>
+
+            <div class="form-actions">
+                <button class="btn" type="submit">@(_isNew ? "Create prospect" : "Save changes")</button>
+                @if (!_isNew)
+                {
+                    <button class="btn ghost danger" type="button" @onclick="DeleteAsync">Delete</button>
+                }
+            </div>
+        </EditForm>
+    }
+</section>
+
+@code {
+    [Parameter] public int Id { get; set; }
+    private bool _isNew, _loading = true, _missing;
+    private Prospect _model = new();
+    private string? _error, _ok;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true; _error = null; _ok = null; _missing = false;
+        _isNew = Nav.ToBaseRelativePath(Nav.Uri).Contains("prospects/new", StringComparison.OrdinalIgnoreCase);
+        if (_isNew) { _model = new Prospect(); _loading = false; return; }
+        var row = await Crm.GetProspectAsync(Id);
+        if (row is null) { _missing = true; _loading = false; return; }
+        _model = row; _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null; _ok = null;
+        if (_isNew) { var created = await Crm.CreateProspectAsync(_model); Nav.NavigateTo($"/crm/prospects/{created.Id}"); return; }
+        var updated = await Crm.UpdateProspectAsync(Id, _model);
+        if (updated is null) { _error = "Not found."; return; }
+        _model = updated; _ok = "Saved.";
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (await Crm.DeleteProspectAsync(Id)) Nav.NavigateTo("/crm/prospects");
+        else _error = "Delete failed.";
+    }
+}

@@ -1,0 +1,43 @@
+@page "/crm/quotes"
+@attribute [Authorize]
+@inject ICrmService Crm
+
+<PageTitle>Quotes — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div><p class="eyebrow">CRM</p><h1>Quotes</h1></div>
+        <a class="btn" href="/crm/quotes/new">Add quote</a>
+    </header>
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (_items.Count == 0) { <p class="muted">No quotes yet.</p> }
+    else
+    {
+        <div class="table-wrap"><table>
+            <thead><tr><th>Number</th><th>Subject</th><th>Account</th><th>Stage</th><th>Total</th><th></th></tr></thead>
+            <tbody>
+            @foreach (var x in _items)
+            {
+                <tr>
+                    <td>@x.QuoteNumber</td>
+                    <td>@x.Subject</td>
+                    <td>@(x.AccountName ?? "—")</td>
+                    <td><span class="pill ok">@(x.QuoteStage ?? "Draft")</span></td>
+                    <td>@x.GrandTotal.ToString("N0")</td>
+                    <td><a href="@($"/crm/quotes/{x.Id}")">Edit</a></td>
+                </tr>
+            }
+            </tbody>
+        </table></div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private List<Quote> _items = new();
+    protected override async Task OnInitializedAsync()
+    {
+        _items = (await Crm.ListQuotesAsync()).ToList();
+        _loading = false;
+    }
+}

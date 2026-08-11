@@ -1,0 +1,94 @@
+@page "/crm/cases/new"
+@page "/crm/cases/{Id:int}"
+@attribute [Authorize]
+@inject ICrmService Crm
+@inject NavigationManager Nav
+
+<PageTitle>@(_isNew ? "Add case" : "Edit case") — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div><p class="eyebrow">CRM · Cases</p><h1>@(_isNew ? "Add case" : "Edit case")</h1></div>
+        <a class="btn ghost" href="/crm/cases">Back</a>
+    </header>
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (!_isNew && _missing) { <p class="alert">Not found.</p> }
+    else
+    {
+        <EditForm Model="_model" OnValidSubmit="SaveAsync" class="form-card form-wide">
+            @if (!string.IsNullOrEmpty(_error)) { <div class="alert">@_error</div> }
+            @if (!string.IsNullOrEmpty(_ok)) { <div class="ok-msg">@_ok</div> }
+            <div class="form-grid">
+                <label>Case number <InputText @bind-Value="_model.CaseNumber" /></label>
+                <label>Subject <InputText @bind-Value="_model.Subject" required /></label>
+                <label>Owner <InputText @bind-Value="_model.CaseOwner" /></label>
+                <label>Type
+                    <InputSelect @bind-Value="_model.CaseType">
+                        <option>Question</option><option>Problem</option><option>Feature Request</option><option>Other</option>
+                    </InputSelect>
+                </label>
+                <label>Priority
+                    <InputSelect @bind-Value="_model.Priority">
+                        <option>Low</option><option>Medium</option><option>High</option><option>Critical</option>
+                    </InputSelect>
+                </label>
+                <label>Status
+                    <InputSelect @bind-Value="_model.CaseStatus">
+                        <option>New</option><option>Working</option><option>Escalated</option>
+                        <option>On Hold</option><option>Resolved</option><option>Closed</option>
+                    </InputSelect>
+                </label>
+                <label>Origin
+                    <InputSelect @bind-Value="_model.Origin">
+                        <option>Phone</option><option>Email</option><option>Web</option><option>Chat</option>
+                    </InputSelect>
+                </label>
+                <label>Account <InputText @bind-Value="_model.AccountName" /></label>
+                <label>Contact <InputText @bind-Value="_model.ContactName" /></label>
+                <label>Reason <InputText @bind-Value="_model.Reason" /></label>
+            </div>
+            <label>Description <InputTextArea @bind-Value="_model.Description" rows="3" /></label>
+            <label>Resolution <InputTextArea @bind-Value="_model.Resolution" rows="2" /></label>
+            <div class="form-actions">
+                <button class="btn" type="submit">@(_isNew ? "Create" : "Save")</button>
+                @if (!_isNew) { <button class="btn ghost danger" type="button" @onclick="DeleteAsync">Delete</button> }
+            </div>
+        </EditForm>
+    }
+</section>
+
+@code {
+    [Parameter] public int Id { get; set; }
+    private bool _isNew, _loading = true, _missing;
+    private CrmCase _model = new() { CaseStatus = "New", Priority = "Medium", CaseType = "Question", Origin = "Phone" };
+    private string? _error, _ok;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true; _error = null; _ok = null; _missing = false;
+        _isNew = Nav.ToBaseRelativePath(Nav.Uri).Contains("cases/new", StringComparison.OrdinalIgnoreCase);
+        if (_isNew)
+        {
+            _model = new CrmCase { CaseOwner = "admin", CaseStatus = "New", Priority = "Medium", CaseType = "Question", Origin = "Phone" };
+            _loading = false; return;
+        }
+        var row = await Crm.GetCaseAsync(Id);
+        if (row is null) { _missing = true; _loading = false; return; }
+        _model = row; _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null; _ok = null;
+        if (_isNew) { var c = await Crm.CreateCaseAsync(_model); Nav.NavigateTo($"/crm/cases/{c.Id}"); return; }
+        var u = await Crm.UpdateCaseAsync(Id, _model);
+        if (u is null) { _error = "Not found."; return; }
+        _model = u; _ok = "Saved.";
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (await Crm.DeleteCaseAsync(Id)) Nav.NavigateTo("/crm/cases");
+        else _error = "Delete failed.";
+    }
+}

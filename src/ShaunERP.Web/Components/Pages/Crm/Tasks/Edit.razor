@@ -1,0 +1,95 @@
+@page "/crm/tasks/new"
+@page "/crm/tasks/{Id:int}"
+@attribute [Authorize]
+@inject ICrmService Crm
+@inject NavigationManager Nav
+
+<PageTitle>@(_isNew ? "Add task" : "Edit task") — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM · Tasks</p>
+            <h1>@(_isNew ? "Add task" : "Edit task")</h1>
+        </div>
+        <a class="btn ghost" href="/crm/tasks">Back</a>
+    </header>
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (!_isNew && _missing) { <p class="alert">Task not found.</p> }
+    else
+    {
+        <EditForm Model="_model" OnValidSubmit="SaveAsync" class="form-card form-wide">
+            @if (!string.IsNullOrEmpty(_error)) { <div class="alert">@_error</div> }
+            @if (!string.IsNullOrEmpty(_ok)) { <div class="ok-msg">@_ok</div> }
+
+            <div class="form-grid">
+                <label>Task owner <InputText @bind-Value="_model.TaskOwner" /></label>
+                <label>Subject <InputText @bind-Value="_model.Subject" required /></label>
+                <label>Due date <InputDate @bind-Value="_model.DueDate" /></label>
+                <label>Related to <InputText @bind-Value="_model.TaskTo" /></label>
+                <label>Task type <InputText @bind-Value="_model.TaskType" /></label>
+                <label>Priority
+                    <InputSelect @bind-Value="_model.Priority">
+                        <option>Low</option><option>Normal</option><option>High</option>
+                    </InputSelect>
+                </label>
+                <label>Status
+                    <InputSelect @bind-Value="_model.TaskStatus">
+                        @foreach (CrmTaskStatus s in Enum.GetValues<CrmTaskStatus>())
+                        {
+                            <option value="@s">@s</option>
+                        }
+                    </InputSelect>
+                </label>
+                <label>Reminder <InputText @bind-Value="_model.Reminder" /></label>
+                <label>Repeat <InputText @bind-Value="_model.Repeat" /></label>
+            </div>
+            <label>Description <InputTextArea @bind-Value="_model.Description" rows="3" /></label>
+
+            <div class="form-actions">
+                <button class="btn" type="submit">@(_isNew ? "Create task" : "Save changes")</button>
+                @if (!_isNew)
+                {
+                    <button class="btn ghost danger" type="button" @onclick="DeleteAsync">Delete</button>
+                }
+            </div>
+        </EditForm>
+    }
+</section>
+
+@code {
+    [Parameter] public int Id { get; set; }
+    private bool _isNew, _loading = true, _missing;
+    private CrmTask _model = new() { Priority = "Normal" };
+    private string? _error, _ok;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true; _error = null; _ok = null; _missing = false;
+        _isNew = Nav.ToBaseRelativePath(Nav.Uri).Contains("tasks/new", StringComparison.OrdinalIgnoreCase);
+        if (_isNew)
+        {
+            _model = new CrmTask { Priority = "Normal", TaskOwner = "admin", DueDate = DateTime.UtcNow.AddDays(1), TaskStatus = CrmTaskStatus.NotStarted };
+            _loading = false; return;
+        }
+        var row = await Crm.GetTaskAsync(Id);
+        if (row is null) { _missing = true; _loading = false; return; }
+        _model = row; _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null; _ok = null;
+        if (_isNew) { var created = await Crm.CreateTaskAsync(_model); Nav.NavigateTo($"/crm/tasks/{created.Id}"); return; }
+        var updated = await Crm.UpdateTaskAsync(Id, _model);
+        if (updated is null) { _error = "Not found."; return; }
+        _model = updated; _ok = "Saved.";
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (await Crm.DeleteTaskAsync(Id)) Nav.NavigateTo("/crm/tasks");
+        else _error = "Delete failed.";
+    }
+}

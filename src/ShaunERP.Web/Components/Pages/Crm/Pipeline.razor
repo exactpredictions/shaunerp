@@ -1,0 +1,61 @@
+@page "/crm/pipeline"
+@attribute [Authorize]
+@inject ICrmService Crm
+
+<PageTitle>Pipeline — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM</p>
+            <h1>Pipeline board</h1>
+            <p class="muted">Open pipeline value: @(_board?.TotalAmount.ToString("N0") ?? "—")</p>
+        </div>
+        <a class="btn" href="/crm/opportunities/new">Add opportunity</a>
+    </header>
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (_error is not null) { <div class="error-state">@_error</div> }
+    else if (_board is not null)
+    {
+        <div class="pipeline-board">
+            @foreach (var col in _board.Columns)
+            {
+                <div class="pipeline-col">
+                    <header>
+                        <strong>@col.Stage</strong>
+                        <span>@col.Count · @col.Amount.ToString("N0")</span>
+                    </header>
+                    <div class="pipeline-cards">
+                        @foreach (var deal in col.Deals)
+                        {
+                            <a class="pipeline-card" href="@($"/crm/opportunities/{deal.Id}")">
+                                <strong>@deal.DealName</strong>
+                                <span>@(deal.AccountName ?? "—")</span>
+                                <span class="amt">@deal.Amount.ToString("N0") · @(deal.Probability ?? 0)%</span>
+                                <span class="owner">@(deal.DealOwner ?? "Unassigned")</span>
+                            </a>
+                        }
+                        @if (col.Deals.Count == 0)
+                        {
+                            <p class="muted tiny">No deals</p>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private CrmPipelineBoard? _board;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _board = await Crm.GetPipelineBoardAsync(); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+}

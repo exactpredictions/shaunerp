@@ -1,0 +1,58 @@
+@page "/crm/tasks"
+@attribute [Authorize]
+@inject ICrmService Crm
+
+<PageTitle>Tasks — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM</p>
+            <h1>Tasks</h1>
+        </div>
+        <a class="btn" href="/crm/tasks/new">Add task</a>
+    </header>
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (_items.Count == 0) { <p class="muted">No tasks yet.</p> }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Subject</th>
+                        <th>Owner</th>
+                        <th>Due</th>
+                        <th>Priority</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var x in _items)
+                    {
+                        <tr>
+                            <td>@x.Subject</td>
+                            <td>@(x.TaskOwner ?? "—")</td>
+                            <td>@(x.DueDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                            <td>@(x.Priority ?? "—")</td>
+                            <td><span class="pill ok">@x.TaskStatus</span></td>
+                            <td><a href="@($"/crm/tasks/{x.Id}")">Edit</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private List<CrmTask> _items = new();
+    protected override async Task OnInitializedAsync()
+    {
+        _items = (await Crm.ListTasksAsync()).ToList();
+        _loading = false;
+    }
+}

@@ -1,0 +1,34 @@
+@page "/login"
+@layout LoginLayout
+@attribute [AllowAnonymous]
+
+<div class="login-card">
+    <p class="eyebrow">ShaunERP</p>
+    <h1>Sign in</h1>
+    <p class="muted">Access your account workspace. Modules appear based on your subscription and permissions.</p>
+
+    @if (HasError)
+    {
+        <div class="alert">Invalid username or password.</div>
+    }
+
+    <form method="post" action="/account/login">
+        <label>
+            Username or email
+            <input name="username" autocomplete="username" required />
+        </label>
+        <label>
+            Password
+            <input name="password" type="password" autocomplete="current-password" required />
+        </label>
+        <button type="submit">Sign in</button>
+    </form>
+    <p class="hint">Demo: <code>admin</code> / <code>Admin@12345</code></p>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    private bool HasError => Error == "1";
+}

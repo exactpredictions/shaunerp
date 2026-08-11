@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://shauninfomedia.com/sitemap.xml

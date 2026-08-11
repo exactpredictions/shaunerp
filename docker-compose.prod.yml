@@ -1,0 +1,74 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: shaunerp-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-shaunerp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-shaunerp}
+    volumes:
+      - shaunerp_pgdata:/var/lib/postgresql/data
+    networks:
+      - shaunerp_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-shaunerp} -d ${POSTGRES_DB:-shaunerp}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: src/ShaunERP.Api/Dockerfile
+    container_name: shaunerp-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: >-
+        Host=db;Port=5432;Database=${POSTGRES_DB:-shaunerp};
+        Username=${POSTGRES_USER:-shaunerp};Password=${POSTGRES_PASSWORD}
+      Jwt__Issuer: ${JWT_ISSUER:-shaunerp}
+      Jwt__Audience: ${JWT_AUDIENCE:-shaunerp}
+      Jwt__Key: ${JWT_KEY}
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      - shaunerp_internal
+
+  web:
+    build:
+      context: .
+      dockerfile: src/ShaunERP.Web/Dockerfile
+    container_name: shaunerp-web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:8081
+      ConnectionStrings__DefaultConnection: >-
+        Host=db;Port=5432;Database=${POSTGRES_DB:-shaunerp};
+        Username=${POSTGRES_USER:-shaunerp};Password=${POSTGRES_PASSWORD}
+      Jwt__Issuer: ${JWT_ISSUER:-shaunerp}
+      Jwt__Audience: ${JWT_AUDIENCE:-shaunerp}
+      Jwt__Key: ${JWT_KEY}
+    volumes:
+      - shaunerp_web_keys:/app/keys
+    ports:
+      - "127.0.0.1:8081:8081"
+    networks:
+      - shaunerp_internal
+
+networks:
+  shaunerp_internal:
+    driver: bridge
+
+volumes:
+  shaunerp_pgdata:
+  shaunerp_web_keys:

@@ -1,0 +1,98 @@
+@page "/platform"
+@attribute [Authorize]
+@inject ITenantContext Tenant
+@inject ShaunErpDbContext Db
+@using Microsoft.EntityFrameworkCore
+@using ShaunERP.Infrastructure.Persistence
+@using ShaunERP.Core.Platform
+
+<PageTitle>Platform Admin — ShaunERP</PageTitle>
+
+@if (!Tenant.IsSystemAdmin && !Tenant.Permissions.Contains(Permissions.PlatformAccess))
+{
+    <div class="error-state">You are not authorized to view platform administration.</div>
+}
+else
+{
+    <section class="page">
+        <div class="breadcrumbs">
+            <a href="/">Home</a>
+            <span class="sep">/</span>
+            <span>Platform</span>
+        </div>
+        <header class="page-head">
+            <div>
+                <p class="eyebrow">Platform administration</p>
+                <h1>ShaunERP platform</h1>
+                <p class="muted">Tenant accounts, module catalogue, and operational overview.</p>
+            </div>
+        </header>
+
+        <div class="stat-grid">
+            <div class="stat-card"><strong>@_tenantCount</strong><span>Accounts</span></div>
+            <div class="stat-card"><strong>@_userCount</strong><span>Users</span></div>
+            <div class="stat-card"><strong>@_moduleDefs</strong><span>Catalogue modules</span></div>
+        </div>
+
+        <div class="dashboard-grid" style="margin-top:1rem">
+            <section class="panel">
+                <h2>Accounts</h2>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>Name</th><th>Domain</th><th>Modules</th></tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var row in _tenants)
+                        {
+                            <tr>
+                                <td>@row.Name</td>
+                                <td>@(row.Domain ?? "—")</td>
+                                <td>@row.Modules</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+            <section class="panel">
+                <h2>Module catalogue</h2>
+                <ul class="list-plain">
+                    @foreach (var module in ModuleCatalog.All.OrderBy(m => m.DisplayOrder))
+                    {
+                        <li>
+                            <strong>@module.Name</strong>
+                            <div class="muted">@module.Key · @(module.IsPlaceholder ? "placeholder" : "available")</div>
+                        </li>
+                    }
+                </ul>
+            </section>
+        </div>
+    </section>
+}
+
+@code {
+    private int _tenantCount;
+    private int _userCount;
+    private int _moduleDefs = ModuleCatalog.All.Count;
+    private List<TenantRow> _tenants = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Tenant.IsSystemAdmin && !Tenant.Permissions.Contains(Permissions.PlatformAccess))
+        {
+            return;
+        }
+
+        _tenantCount = await Db.Companies.CountAsync();
+        _userCount = await Db.Users.CountAsync();
+        var companies = await Db.Companies.AsNoTracking().Include(c => c.CompanyModules).OrderBy(c => c.Name).ToListAsync();
+        _tenants = companies.Select(c => new TenantRow(
+            c.Name,
+            c.Domain,
+            string.Join(", ", c.CompanyModules.Select(m => string.IsNullOrWhiteSpace(m.ModuleKey) ? m.ModuleName : m.ModuleKey))
+        )).ToList();
+    }
+
+    private sealed record TenantRow(string Name, string? Domain, string Modules);
+}

@@ -1,0 +1,327 @@
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Routing
+@using ShaunERP.Core.Platform
+@using ShaunERP.Infrastructure.Platform
+@using ShaunERP.Web.Services
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject ShellStateService Shell
+@inject ITenantContext Tenant
+@inject NavigationManager Nav
+
+<div class="app-shell @(Shell.SidebarCollapsed ? "collapsed" : null)">
+    <header class="app-header">
+        <button type="button" class="icon-btn mobile-toggle" @onclick="ToggleMobileNav" aria-label="Open navigation">☰</button>
+        <button type="button" class="icon-btn desktop-sidebar-toggle" @onclick="ToggleSidebar" title="@(Shell.SidebarCollapsed ? "Expand sidebar" : "Collapse sidebar")" aria-label="Toggle sidebar">
+            @(Shell.SidebarCollapsed ? "☰" : "«")
+        </button>
+        <a class="brand-lockup" href="/">
+            <span class="brand-mark">S</span>
+            <span>
+                <strong>ShaunERP</strong>
+                <span>Modular business platform</span>
+            </span>
+        </a>
+
+        <AuthorizeView>
+            <Authorized>
+                <div class="menu-wrap">
+                    <button type="button" class="header-chip" @onclick="ToggleAccountMenu" aria-haspopup="true" aria-expanded="@_accountOpen">
+                        <span>@(Tenant.CompanyName ?? "No account")</span>
+                        <span class="muted">Account</span>
+                    </button>
+                    @if (_accountOpen)
+                    {
+                        <div class="account-menu" role="menu">
+                            @foreach (var account in Shell.Accounts)
+                            {
+                                <form method="post" action="/account/switch">
+                                    <input type="hidden" name="companyId" value="@account.Id" />
+                                    <button type="submit" role="menuitem">
+                                        @account.Name
+                                        @if (Tenant.CompanyId == account.Id)
+                                        {
+                                            <span class="muted"> (current)</span>
+                                        }
+                                    </button>
+                                </form>
+                            }
+                            @if (Shell.Accounts.Count == 0)
+                            {
+                                <button type="button" disabled>No memberships</button>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <button type="button" class="header-chip" @onclick="ToggleModuleSwitcher" aria-haspopup="dialog">
+                    <span>@(Shell.CurrentModule?.Name ?? "Modules")</span>
+                    <span class="muted">Switch</span>
+                </button>
+
+                <div class="header-actions">
+                    <button type="button" class="ghost-btn" title="Search coming soon" disabled>Search</button>
+                    <button type="button" class="icon-btn" title="Notifications" disabled aria-label="Notifications">🔔</button>
+                    <a class="icon-btn" href="https://shauninfomedia.com/" target="_blank" rel="noopener" title="Help" aria-label="Help">?</a>
+                    <div class="menu-wrap">
+                        <button type="button" class="header-chip" @onclick="ToggleUserMenu">
+                            <span>@context.User.Identity?.Name</span>
+                            <span class="muted">Profile</span>
+                        </button>
+                        @if (_userOpen)
+                        {
+                            <div class="user-menu" role="menu">
+                                <a href="/">Main dashboard</a>
+                                @if (Tenant.IsSystemAdmin)
+                                {
+                                    <a href="/platform">Platform admin</a>
+                                }
+                                <a href="/account/logout">Sign out</a>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+    </header>
+
+    <aside class="sidebar @(Shell.MobileNavOpen ? "open" : null)" aria-label="Module navigation">
+        @* sidebar-inner must be the flex column — AuthorizeView wraps content and breaks flex scroll *@
+        <div class="sidebar-inner">
+            <div class="sidebar-module">
+                <div class="label">Module</div>
+                <div class="name" title="@(Shell.CurrentModule?.Name ?? "Home")">@(Shell.CurrentModule?.Name ?? "Home")</div>
+            </div>
+
+            <nav class="sidebar-nav">
+                @{
+                    string? lastGroup = null;
+                }
+                @foreach (var item in Shell.Navigation)
+                {
+                    if (!string.IsNullOrWhiteSpace(item.Group) && item.Group != lastGroup)
+                    {
+                        lastGroup = item.Group;
+                        <div class="nav-group">@item.Group</div>
+                    }
+                    <NavLink href="@item.Route"
+                             class="nav-link"
+                             title="@item.Title"
+                             Match="@NavMatchFor(item.Route)"
+                             @onclick="OnNavClick">
+                        <span class="nav-glyph" aria-hidden="true">@NavGlyph(item.Title)</span>
+                        <span class="nav-label">@item.Title</span>
+                    </NavLink>
+                }
+                @if (Shell.Navigation.Count == 0)
+                {
+                    <p class="nav-empty">No pages available for this module.</p>
+                }
+            </nav>
+
+            <div class="sidebar-foot">
+                <button type="button" class="sidebar-toggle" @onclick="ToggleSidebar" title="@(Shell.SidebarCollapsed ? "Expand sidebar" : "Collapse sidebar")" aria-label="@(Shell.SidebarCollapsed ? "Expand sidebar" : "Collapse sidebar")">
+                    <span aria-hidden="true">@(Shell.SidebarCollapsed ? "»" : "«")</span>
+                    <span class="toggle-label">@(Shell.SidebarCollapsed ? "Expand" : "Collapse")</span>
+                </button>
+            </div>
+        </div>
+    </aside>
+
+    @if (Shell.MobileNavOpen)
+    {
+        <div class="sidebar-backdrop" @onclick="CloseMobileNav"></div>
+    }
+
+    <main class="content" @onclick="CloseOverlays">
+        @Body
+    </main>
+</div>
+
+@if (Shell.ModuleSwitcherOpen)
+{
+    <div class="panel-backdrop" @onclick="Shell.CloseModuleSwitcher"></div>
+    <div class="module-switcher" role="dialog" aria-label="Module switcher" @onkeydown="OnSwitcherKey">
+        <div class="module-switcher-head">
+            <strong>Switch module</strong>
+            <input @ref="_searchBox" @bind="_search" @bind:event="oninput" placeholder="Search modules" aria-label="Search modules" />
+        </div>
+        <div class="module-switcher-body">
+            @if (Recent.Count > 0)
+            {
+                <div class="module-group">
+                    <h3>Recent</h3>
+                    <div class="module-list">
+                        @foreach (var module in Recent)
+                        {
+                            <ModuleRow Module="module" Active="@(module.Key == Shell.CurrentModuleKey)" Favourite="Shell.IsFavourite(module.Key)"
+                                       OnSelect="SelectModule" OnFavourite="ToggleFavourite" />
+                        }
+                    </div>
+                </div>
+            }
+            @if (Favourites.Count > 0)
+            {
+                <div class="module-group">
+                    <h3>Favourites</h3>
+                    <div class="module-list">
+                        @foreach (var module in Favourites)
+                        {
+                            <ModuleRow Module="module" Active="@(module.Key == Shell.CurrentModuleKey)" Favourite="true"
+                                       OnSelect="SelectModule" OnFavourite="ToggleFavourite" />
+                        }
+                    </div>
+                </div>
+            }
+            @foreach (var group in FilteredGroups)
+            {
+                <div class="module-group">
+                    <h3>@ModuleCategoryDisplay.GetLabel(group.Key)</h3>
+                    <div class="module-list">
+                        @foreach (var module in group)
+                        {
+                            <ModuleRow Module="module" Active="@(module.Key == Shell.CurrentModuleKey)" Favourite="Shell.IsFavourite(module.Key)"
+                                       OnSelect="SelectModule" OnFavourite="ToggleFavourite" />
+                        }
+                    </div>
+                </div>
+            }
+            @if (!FilteredGroups.Any() && Recent.Count == 0 && Favourites.Count == 0)
+            {
+                <div class="empty-state">No modules match your search or access.</div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private bool _accountOpen;
+    private bool _userOpen;
+    private string _search = string.Empty;
+    private ElementReference _searchBox;
+
+    private IEnumerable<IGrouping<ModuleCategory, ModuleDefinition>> FilteredGroups =>
+        Shell.AccessibleModules
+            .Where(m => string.IsNullOrWhiteSpace(_search)
+                || m.Name.Contains(_search, StringComparison.OrdinalIgnoreCase)
+                || m.Description.Contains(_search, StringComparison.OrdinalIgnoreCase))
+            .GroupBy(m => m.Category)
+            .OrderBy(g => g.Key);
+
+    private IReadOnlyList<ModuleDefinition> Recent =>
+        Shell.RecentModuleKeys()
+            .Select(k => Shell.AccessibleModules.FirstOrDefault(m => m.Key.Equals(k, StringComparison.OrdinalIgnoreCase)))
+            .Where(m => m is not null)
+            .Cast<ModuleDefinition>()
+            .ToList();
+
+    private IReadOnlyList<ModuleDefinition> Favourites =>
+        Shell.AccessibleModules.Where(m => Shell.IsFavourite(m.Key)).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        Shell.Changed += OnShellChanged;
+        await Shell.InitializeAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Shell.ModuleSwitcherOpen)
+        {
+            try { await _searchBox.FocusAsync(); } catch { /* ignore */ }
+        }
+    }
+
+    private void OnShellChanged() => InvokeAsync(StateHasChanged);
+
+    private async Task ToggleSidebar()
+    {
+        await Shell.ToggleSidebarAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void ToggleMobileNav()
+    {
+        Shell.ToggleMobileNav();
+    }
+
+    private void CloseMobileNav()
+    {
+        Shell.CloseMobileNav();
+    }
+
+    private void ToggleAccountMenu()
+    {
+        _accountOpen = !_accountOpen;
+        _userOpen = false;
+        Shell.CloseModuleSwitcher();
+    }
+
+    private void ToggleUserMenu()
+    {
+        _userOpen = !_userOpen;
+        _accountOpen = false;
+        Shell.CloseModuleSwitcher();
+    }
+
+    private void ToggleModuleSwitcher()
+    {
+        _accountOpen = false;
+        _userOpen = false;
+        Shell.ToggleModuleSwitcher();
+    }
+
+    private void CloseOverlays()
+    {
+        _accountOpen = false;
+        _userOpen = false;
+        Shell.CloseMobileNav();
+    }
+
+    private void OnNavClick()
+    {
+        Shell.CloseMobileNav();
+        _accountOpen = false;
+        _userOpen = false;
+    }
+
+    private static NavLinkMatch NavMatchFor(string route)
+    {
+        // Roots and module dashboards must be exact so child pages do not keep them active.
+        if (string.IsNullOrWhiteSpace(route) || route == "/")
+            return NavLinkMatch.All;
+
+        var trimmed = route.TrimEnd('/');
+        if (trimmed is "/crm" or "/users" or "/platform" or "/finance" or "/hrms" or "/projects")
+            return NavLinkMatch.All;
+
+        return NavLinkMatch.Prefix;
+    }
+
+    private static string NavGlyph(string title)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return "·";
+        var parts = title.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2
+            ? $"{char.ToUpperInvariant(parts[0][0])}{char.ToUpperInvariant(parts[1][0])}"
+            : title[..Math.Min(2, title.Length)].ToUpperInvariant();
+    }
+
+    private async Task SelectModule(string key)
+    {
+        _search = string.Empty;
+        await Shell.SelectModuleAsync(key);
+    }
+
+    private async Task ToggleFavourite(string key) => await Shell.ToggleFavouriteAsync(key);
+
+    private void OnSwitcherKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            Shell.CloseModuleSwitcher();
+        }
+    }
+
+    public void Dispose() => Shell.Changed -= OnShellChanged;
+}

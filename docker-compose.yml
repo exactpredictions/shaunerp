@@ -1,0 +1,42 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: shaunerp-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-shaunerp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shaunerp_dev_change_me}
+      POSTGRES_DB: ${POSTGRES_DB:-shaunerp}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - shaunerp_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-shaunerp} -d ${POSTGRES_DB:-shaunerp}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: src/ShaunERP.Api/Dockerfile
+    container_name: shaunerp-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: >-
+        Host=db;Port=5432;Database=${POSTGRES_DB:-shaunerp};
+        Username=${POSTGRES_USER:-shaunerp};Password=${POSTGRES_PASSWORD:-shaunerp_dev_change_me}
+      Jwt__Issuer: ${JWT_ISSUER:-shaunerp}
+      Jwt__Audience: ${JWT_AUDIENCE:-shaunerp}
+      Jwt__Key: ${JWT_KEY:-CHANGE_ME_TO_A_LONG_RANDOM_SECRET_KEY_32CHARS}
+    ports:
+      - "${API_PORT:-8080}:8080"
+
+volumes:
+  shaunerp_pgdata:

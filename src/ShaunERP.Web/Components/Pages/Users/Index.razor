@@ -1,0 +1,68 @@
+@page "/users"
+@attribute [Authorize]
+@inject IUserManagementService Users
+@inject NavigationManager Nav
+
+<PageTitle>Users — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">User Management</p>
+            <h1>Users</h1>
+        </div>
+        <a class="btn" href="/users/new">Add user</a>
+    </header>
+
+    @if (_loading)
+    {
+        <p class="muted">Loading users…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="muted">No users found.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Username</th>
+                        <th>Email</th>
+                        <th>Roles</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var u in _items)
+                    {
+                        <tr>
+                            <td>@u.FirstName @u.LastName</td>
+                            <td>@u.Username</td>
+                            <td>@u.Email</td>
+                            <td>@(u.Roles.Count == 0 ? "—" : string.Join(", ", u.Roles))</td>
+                            <td>
+                                <span class="pill @(u.IsActive ? "ok" : "off")">@(u.IsActive ? "Active" : "Inactive")</span>
+                            </td>
+                            <td><a href="@($"/users/{u.Id}")">Edit</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private List<UserListItem> _items = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _items = (await Users.ListUsersAsync()).ToList();
+        _loading = false;
+    }
+}

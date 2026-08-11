@@ -1,0 +1,133 @@
+@page "/crm/opportunities/new"
+@page "/crm/opportunities/{Id:int}"
+@attribute [Authorize]
+@inject ICrmService Crm
+@inject NavigationManager Nav
+
+<PageTitle>@(_isNew ? "Add opportunity" : "Edit opportunity") — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM · Opportunities</p>
+            <h1>@(_isNew ? "Add opportunity" : "Edit opportunity")</h1>
+        </div>
+        <a class="btn ghost" href="/crm/opportunities">Back</a>
+    </header>
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (!_isNew && _missing) { <p class="alert">Opportunity not found.</p> }
+    else
+    {
+        <EditForm Model="_model" OnValidSubmit="SaveAsync" class="form-card form-wide">
+            @if (!string.IsNullOrEmpty(_error)) { <div class="alert">@_error</div> }
+            @if (!string.IsNullOrEmpty(_ok)) { <div class="ok-msg">@_ok</div> }
+
+            <h2 class="form-section">Deal details</h2>
+            <div class="form-grid">
+                <label>Deal owner <InputText @bind-Value="_model.DealOwner" /></label>
+                <label>Deal name <InputText @bind-Value="_model.DealName" required /></label>
+                <label>Account name <InputText @bind-Value="_model.AccountName" /></label>
+                <label>Type <InputText @bind-Value="_model.Type" /></label>
+                <label>Contact name <InputText @bind-Value="_model.ContactName" /></label>
+                <label>Lead source <InputText @bind-Value="_model.LeadSource" /></label>
+                <label>Next step <InputText @bind-Value="_model.NextStep" /></label>
+                <label>Campaign source <InputText @bind-Value="_model.CampaignSource" /></label>
+                <label>Territory <InputText @bind-Value="_model.Territory" /></label>
+                <label>Forecast category
+                    <InputSelect @bind-Value="_model.ForecastCategory">
+                        <option>Pipeline</option><option>Best Case</option><option>Commit</option><option>Omitted</option><option>Closed</option>
+                    </InputSelect>
+                </label>
+            </div>
+
+            <h2 class="form-section">Pipeline &amp; finance</h2>
+            <div class="form-grid">
+                <label>Pipeline <InputText @bind-Value="_model.Pipeline" /></label>
+                <label>Stage
+                    <InputSelect @bind-Value="_model.Stage">
+                        @foreach (var s in Stages) { <option value="@s">@s</option> }
+                    </InputSelect>
+                </label>
+                <label>Amount <InputNumber @bind-Value="_model.Amount" /></label>
+                <label>Expected revenue <InputNumber @bind-Value="_model.ExpectedRevenue" /></label>
+                <label>Probability % <InputNumber @bind-Value="_model.Probability" /></label>
+                <label>Closing date <InputDate @bind-Value="_model.ClosingDate" /></label>
+                <label>Actual close date <InputDate @bind-Value="_model.ActualCloseDate" /></label>
+                <label>Actual revenue <InputNumber @bind-Value="_model.ActualRevenue" /></label>
+                <label>Win/loss reason <InputText @bind-Value="_model.WinLossReason" /></label>
+                <label>Competitor <InputText @bind-Value="_model.Competitor" /></label>
+            </div>
+
+            <label>Description <InputTextArea @bind-Value="_model.Description" rows="3" /></label>
+
+            <div class="form-actions">
+                <button class="btn" type="submit">@(_isNew ? "Create opportunity" : "Save changes")</button>
+                @if (!_isNew)
+                {
+                    <button class="btn" type="button" @onclick="WinAsync">Mark won → customer</button>
+                    <button class="btn ghost" type="button" @onclick="LoseAsync">Mark lost</button>
+                    <button class="btn ghost danger" type="button" @onclick="DeleteAsync">Delete</button>
+                }
+            </div>
+        </EditForm>
+    }
+</section>
+
+@code {
+    [Parameter] public int Id { get; set; }
+    private static readonly string[] Stages = ["Qualification", "Needs Analysis", "Proposal", "Negotiation", "Closed Won", "Closed Lost"];
+    private bool _isNew, _loading = true, _missing;
+    private Opportunity _model = new() { Stage = "Qualification", Pipeline = "Standard", ForecastCategory = "Pipeline" };
+    private string? _error, _ok;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true; _error = null; _ok = null; _missing = false;
+        _isNew = Nav.ToBaseRelativePath(Nav.Uri).Contains("opportunities/new", StringComparison.OrdinalIgnoreCase);
+        if (_isNew)
+        {
+            _model = new Opportunity
+            {
+                Stage = "Qualification", Pipeline = "Standard", DealOwner = "admin",
+                ForecastCategory = "Pipeline", ClosingDate = DateTime.UtcNow.AddDays(30), Probability = 10
+            };
+            _loading = false; return;
+        }
+        var row = await Crm.GetOpportunityAsync(Id);
+        if (row is null) { _missing = true; _loading = false; return; }
+        _model = row; _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null; _ok = null;
+        if (_isNew) { var created = await Crm.CreateOpportunityAsync(_model); Nav.NavigateTo($"/crm/opportunities/{created.Id}"); return; }
+        var updated = await Crm.UpdateOpportunityAsync(Id, _model);
+        if (updated is null) { _error = "Not found."; return; }
+        _model = updated; _ok = "Saved.";
+    }
+
+    private async Task WinAsync()
+    {
+        _error = null;
+        var (ok, error, customer) = await Crm.WinOpportunityAsync(Id, _model.WinLossReason);
+        if (!ok) { _error = error; return; }
+        Nav.NavigateTo($"/crm/customers/{customer!.Id}");
+    }
+
+    private async Task LoseAsync()
+    {
+        _error = null;
+        var (ok, error) = await Crm.LoseOpportunityAsync(Id, _model.WinLossReason ?? "Lost");
+        if (!ok) { _error = error; return; }
+        _model = (await Crm.GetOpportunityAsync(Id))!;
+        _ok = "Marked as Closed Lost.";
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (await Crm.DeleteOpportunityAsync(Id)) Nav.NavigateTo("/crm/opportunities");
+        else _error = "Delete failed.";
+    }
+}

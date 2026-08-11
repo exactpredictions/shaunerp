@@ -1,0 +1,48 @@
+## .NET
+bin/
+obj/
+out/
+artifacts/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+*.DotSettings.user
+
+## Secrets / local env
+.env
+appsettings.*.local.json
+**/appsettings.Local.json
+
+## Logs & test
+[Ll]og/
+[Ll]ogs/
+TestResults/
+coverage*
+*.coverage
+
+## OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+
+## Packages / archives (never commit theme zips)
+*.zip
+*.rar
+*.7z
+node_modules/
+
+## Local scratch / upload staging (not source)
+.tmp-*/
+.tmp-*
+
+## EF
+*.db
+*.db-shm
+*.db-wal
+
+## Deploy site backups
+deploy/**/public-backup*/
+

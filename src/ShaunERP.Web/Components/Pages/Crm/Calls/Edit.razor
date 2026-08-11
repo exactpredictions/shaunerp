@@ -1,0 +1,86 @@
+@page "/crm/calls/new"
+@page "/crm/calls/{Id:int}"
+@attribute [Authorize]
+@inject ICrmService Crm
+@inject NavigationManager Nav
+
+<PageTitle>@(_isNew ? "Log call" : "Edit call") — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div><p class="eyebrow">CRM · Calls</p><h1>@(_isNew ? "Log call" : "Edit call")</h1></div>
+        <a class="btn ghost" href="/crm/calls">Back</a>
+    </header>
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (!_isNew && _missing) { <p class="alert">Not found.</p> }
+    else
+    {
+        <EditForm Model="_model" OnValidSubmit="SaveAsync" class="form-card form-wide">
+            @if (!string.IsNullOrEmpty(_error)) { <div class="alert">@_error</div> }
+            @if (!string.IsNullOrEmpty(_ok)) { <div class="ok-msg">@_ok</div> }
+            <div class="form-grid">
+                <label>Subject <InputText @bind-Value="_model.Subject" required /></label>
+                <label>Owner <InputText @bind-Value="_model.CallOwner" /></label>
+                <label>Type
+                    <InputSelect @bind-Value="_model.CallType">
+                        <option>Outbound</option><option>Inbound</option>
+                    </InputSelect>
+                </label>
+                <label>Purpose <InputText @bind-Value="_model.CallPurpose" /></label>
+                <label>Start <InputDate @bind-Value="_model.CallStart" /></label>
+                <label>Duration (min) <InputNumber @bind-Value="_model.DurationMinutes" /></label>
+                <label>Result <InputText @bind-Value="_model.CallResult" /></label>
+                <label>Contact <InputText @bind-Value="_model.ContactName" /></label>
+                <label>Phone <InputText @bind-Value="_model.PhoneNumber" /></label>
+                <label>Related type
+                    <InputSelect @bind-Value="_model.RelatedEntityType">
+                        <option value="">—</option>
+                        @foreach (var t in CrmRelatedTypes.All) { <option value="@t">@t</option> }
+                    </InputSelect>
+                </label>
+                <label>Related ID <InputNumber @bind-Value="_model.RelatedEntityId" /></label>
+            </div>
+            <label>Notes <InputTextArea @bind-Value="_model.Description" rows="3" /></label>
+            <div class="form-actions">
+                <button class="btn" type="submit">@(_isNew ? "Log call" : "Save")</button>
+                @if (!_isNew) { <button class="btn ghost danger" type="button" @onclick="DeleteAsync">Delete</button> }
+            </div>
+        </EditForm>
+    }
+</section>
+
+@code {
+    [Parameter] public int Id { get; set; }
+    private bool _isNew, _loading = true, _missing;
+    private CrmCall _model = new() { CallType = "Outbound" };
+    private string? _error, _ok;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true; _error = null; _ok = null; _missing = false;
+        _isNew = Nav.ToBaseRelativePath(Nav.Uri).Contains("calls/new", StringComparison.OrdinalIgnoreCase);
+        if (_isNew)
+        {
+            _model = new CrmCall { CallOwner = "admin", CallType = "Outbound", CallStart = DateTime.UtcNow };
+            _loading = false; return;
+        }
+        var row = await Crm.GetCallAsync(Id);
+        if (row is null) { _missing = true; _loading = false; return; }
+        _model = row; _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null; _ok = null;
+        if (_isNew) { var c = await Crm.CreateCallAsync(_model); Nav.NavigateTo($"/crm/calls/{c.Id}"); return; }
+        var u = await Crm.UpdateCallAsync(Id, _model);
+        if (u is null) { _error = "Not found."; return; }
+        _model = u; _ok = "Saved.";
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (await Crm.DeleteCallAsync(Id)) Nav.NavigateTo("/crm/calls");
+        else _error = "Delete failed.";
+    }
+}

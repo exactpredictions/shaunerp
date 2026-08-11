@@ -1,0 +1,60 @@
+@page "/crm/opportunities"
+@attribute [Authorize]
+@inject ICrmService Crm
+
+<PageTitle>Opportunities — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM</p>
+            <h1>Opportunities</h1>
+        </div>
+        <a class="btn" href="/crm/opportunities/new">Add opportunity</a>
+    </header>
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (_items.Count == 0) { <p class="muted">No opportunities yet.</p> }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Deal</th>
+                        <th>Account</th>
+                        <th>Stage</th>
+                        <th>Amount</th>
+                        <th>Close</th>
+                        <th>Owner</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var x in _items)
+                    {
+                        <tr>
+                            <td>@x.DealName</td>
+                            <td>@(x.AccountName ?? "—")</td>
+                            <td><span class="pill ok">@(x.Stage ?? "—")</span></td>
+                            <td>@x.Amount.ToString("N0")</td>
+                            <td>@(x.ClosingDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                            <td>@(x.DealOwner ?? "—")</td>
+                            <td><a href="@($"/crm/opportunities/{x.Id}")">Edit</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private List<Opportunity> _items = new();
+    protected override async Task OnInitializedAsync()
+    {
+        _items = (await Crm.ListOpportunitiesAsync()).ToList();
+        _loading = false;
+    }
+}

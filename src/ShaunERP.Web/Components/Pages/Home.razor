@@ -1,0 +1,94 @@
+@page "/"
+@attribute [Authorize]
+@inject IModuleRegistry Modules
+@inject ITenantContext Tenant
+@inject ShellStateService Shell
+@inject NavigationManager Nav
+
+<PageTitle>Dashboard — ShaunERP</PageTitle>
+
+<section class="page">
+    <div class="breadcrumbs">
+        <span>Home</span>
+        <span class="sep">/</span>
+        <span>Main dashboard</span>
+    </div>
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">Main ERP dashboard</p>
+            <h1>Welcome@(string.IsNullOrWhiteSpace(_name) ? "" : $", {_name}")</h1>
+            <p class="muted">Account: @(Tenant.CompanyName ?? "Not assigned") · Modules available to you are shown below.</p>
+        </div>
+    </header>
+
+    @if (_accessible.Count == 0)
+    {
+        <div class="empty-state">
+            This account has no enabled operational modules for your user.
+            Contact an administrator to enable CRM or User Management.
+        </div>
+    }
+    else
+    {
+        @if (_accessible.Count == 1)
+        {
+            <div class="ok-msg">
+                You have access to a single module.
+                <a href="@_accessible[0].DashboardRoute">Open @_accessible[0].Name</a>
+                · stay on the main dashboard anytime via Home.
+            </div>
+        }
+
+        <div class="stat-grid">
+            @foreach (var module in _accessible)
+            {
+                <a class="stat-card" href="#" @onclick="() => OpenModule(module.Key)" @onclick:preventDefault>
+                    <strong>@module.Name</strong>
+                    <span>@module.Description</span>
+                </a>
+            }
+        </div>
+
+        <div class="dashboard-grid" style="margin-top:1rem">
+            <section class="panel">
+                <h2>Frequently used</h2>
+                <ul class="list-plain">
+                    @foreach (var module in _accessible.Take(5))
+                    {
+                        <li>
+                            <a href="@module.DashboardRoute">@module.Name dashboard</a>
+                            <div class="muted">@module.BaseRoute</div>
+                        </li>
+                    }
+                </ul>
+            </section>
+            <section class="panel">
+                <h2>Account context</h2>
+                <ul class="list-plain">
+                    <li><strong>Account</strong><div class="muted">@(Tenant.CompanyName ?? "—")</div></li>
+                    <li><strong>Entitlements</strong><div class="muted">@string.Join(", ", Tenant.Entitlements.OrderBy(x => x))</div></li>
+                    <li><strong>Role level</strong><div class="muted">@(Tenant.IsSystemAdmin ? "Platform administrator" : "Tenant user")</div></li>
+                </ul>
+            </section>
+        </div>
+    }
+</section>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    private List<ModuleDefinition> _accessible = new();
+    private string? _name;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Shell.InitializeAsync();
+        _accessible = Modules.GetAccessible(Tenant).Where(m => m.Key != ModuleKeys.Platform || Tenant.IsSystemAdmin).ToList();
+        if (AuthState is not null)
+        {
+            var state = await AuthState;
+            _name = state.User.FindFirst("full_name")?.Value ?? state.User.Identity?.Name;
+        }
+    }
+
+    private async Task OpenModule(string key) => await Shell.SelectModuleAsync(key);
+}
