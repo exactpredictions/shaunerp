@@ -26,6 +26,8 @@ public class DbSeeder
         await _db.Database.EnsureCreatedAsync(ct);
         await EnsurePlatformSchemaAsync(ct);
         await EnsureCrmSchemaAsync(ct);
+        await EnsureFinanceSchemaAsync(ct);
+        await EnsureSalesOrderSchemaAsync(ct);
         await EnsureRolesAndPermissionsAsync(ct);
         await NormalizeCompanyModulesAsync(ct);
 
@@ -60,6 +62,7 @@ public class DbSeeder
             _db.CompanyModules.AddRange(
                 Module(company.Id, ModuleKeys.Crm, "CRM"),
                 Module(company.Id, ModuleKeys.Finance, "Finance"),
+                Module(company.Id, ModuleKeys.Orders, "Sales Orders"),
                 Module(company.Id, ModuleKeys.Hrms, "HRMS"),
                 Module(company.Id, ModuleKeys.Projects, "Projects"),
                 Module(company.Id, ModuleKeys.Users, "Users"));
@@ -73,7 +76,15 @@ public class DbSeeder
                 TenantCompanyId = company.Id,
                 Name = "Demo Company",
                 LegalName = "Demo Company LLC",
-                Currency = "USD"
+                Currency = "USD",
+                InvoiceNumberPrefix = "INV-",
+                NextInvoiceSequence = 1001,
+                OrderNumberPrefix = "SO-",
+                NextOrderSequence = 1001,
+                DefaultPaymentTerms = "Net 30",
+                DefaultDueDays = 30,
+                Email = "billing@demo.local",
+                TaxId = "US-TAX-DEMO"
             };
             _db.CompanyMasters.Add(books);
             await _db.SaveChangesAsync(ct);
@@ -89,9 +100,16 @@ public class DbSeeder
             _logger.LogInformation("Seed complete. Login: admin / Admin@12345");
         }
 
-        await SeedCrmDemoAsync(ct);
-        await SeedCrmExtendedDemoAsync(ct);
+        try
+        {
+            await SeedRichDemoDataAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Rich CRM/Finance demo seed failed; continuing startup.");
+        }
         await AssignOrphanCrmToFirstCompanyAsync(ct);
+        await AssignOrphanFinanceToFirstCompanyAsync(ct);
     }
 
     private async Task EnsureRolesAndPermissionsAsync(CancellationToken ct)
@@ -176,6 +194,22 @@ public class DbSeeder
         }
 
         await _db.SaveChangesAsync(ct);
+
+        // Ensure every company has Sales Orders entitlement enabled.
+        var companyIds = await _db.Companies.Select(c => c.Id).ToListAsync(ct);
+        var existing = await _db.CompanyModules.ToListAsync(ct);
+        foreach (var companyId in companyIds)
+        {
+            var hasOrders = existing.Any(m =>
+                m.CompanyId == companyId &&
+                m.ModuleKey.Equals(ModuleKeys.Orders, StringComparison.OrdinalIgnoreCase));
+            if (!hasOrders)
+            {
+                _db.CompanyModules.Add(Module(companyId, ModuleKeys.Orders, "Sales Orders"));
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
     }
 
     private async Task AssignOrphanCrmToFirstCompanyAsync(CancellationToken ct)
@@ -210,262 +244,737 @@ public class DbSeeder
         }
     }
 
-    private async Task SeedCrmDemoAsync(CancellationToken ct)
-    {
-        if (await _db.Leads.AnyAsync(ct)) return;
-
-        _logger.LogInformation("Seeding sample CRM records...");
-        var companyId = await _db.Companies.OrderBy(c => c.Id).Select(c => (int?)c.Id).FirstOrDefaultAsync(ct);
-
-        var lead = new Lead
-        {
-            CompanyId = companyId,
-            LeadOwner = "admin",
-            FirstName = "Priya",
-            LastName = "Sharma",
-            Title = "IT Manager",
-            CompanyName = "Chennai Retail Pvt Ltd",
-            Email = "priya@chennairetail.example",
-            Phone = "+91 44 4000 1000",
-            Mobile = "+91 98765 43210",
-            LeadSource = "Website",
-            Industry = "Retail",
-            LeadStatus = "New",
-            Rating = "Hot",
-            City = "Chennai",
-            Country = "India",
-            Description = "Interested in ShaunERP demo."
-        };
-        _db.Leads.Add(lead);
-        await _db.SaveChangesAsync(ct);
-
-        var prospect = new Prospect
-        {
-            CompanyId = companyId,
-            CompanyName = "Merlin Analytics Prospects",
-            FirstName = "Arun",
-            LastName = "Kumar",
-            Email = "arun@example.com",
-            PhoneNumber = "+91 90000 11111",
-            LeadId = null
-        };
-        _db.Prospects.Add(prospect);
-
-        var customer = new Customer
-        {
-            CompanyId = companyId,
-            CompanyName = "Only41 Partners",
-            PrimaryContact = "Suresh",
-            Email = "billing@only41.example",
-            PhoneNumber = "+91 44 2222 3333",
-            PaymentTerms = "Net 30",
-            CreditLimit = 500000,
-            TaxId = "33AAAAA0000A1Z0"
-        };
-        _db.CrmCustomers.Add(customer);
-        await _db.SaveChangesAsync(ct);
-
-        _db.Contacts.Add(new Contact
-        {
-            CompanyId = companyId,
-            ContactOwner = "admin",
-            FirstName = "Meera",
-            LastName = "Iyer",
-            Title = "CFO",
-            AccountName = customer.CompanyName,
-            Email = "meera@only41.example",
-            Phone = "+91 44 2222 3334",
-            CustomerId = customer.Id
-        });
-
-        _db.Opportunities.Add(new Opportunity
-        {
-            CompanyId = companyId,
-            DealOwner = "admin",
-            DealName = "ShaunERP Annual License",
-            AccountName = "Chennai Retail Pvt Ltd",
-            Type = "New Business",
-            Amount = 240000,
-            ClosingDate = DateTime.UtcNow.AddDays(30),
-            Probability = 40,
-            Pipeline = "Standard",
-            Stage = "Qualification",
-            LeadId = lead.Id,
-            ExpectedRevenue = 96000
-        });
-
-        _db.CrmTasks.Add(new CrmTask
-        {
-            CompanyId = companyId,
-            TaskOwner = "admin",
-            Subject = "Follow up CRM demo",
-            DueDate = DateTime.UtcNow.AddDays(2),
-            TaskTo = "Priya Sharma",
-            TaskType = "Call",
-            Priority = "High",
-            TaskStatus = CrmTaskStatus.NotStarted,
-            Description = "Schedule product walkthrough."
-        });
-
-        _db.Meetings.Add(new Meeting
-        {
-            CompanyId = companyId,
-            Title = "Discovery call — Chennai Retail",
-            Location = "Google Meet",
-            Host = "admin",
-            Participants = "priya@chennairetail.example, admin",
-            RelatedTo = "Lead: Priya Sharma",
-            From = DateTime.UtcNow.AddDays(1).Date.AddHours(10),
-            To = DateTime.UtcNow.AddDays(1).Date.AddHours(11),
-            MeetingType = "Online",
-            Agenda = "Requirements and timeline"
-        });
-
-        await _db.SaveChangesAsync(ct);
-    }
-
-    private async Task SeedCrmExtendedDemoAsync(CancellationToken ct)
+    /// <summary>
+    /// Idempotent rich CRM + Finance demo data for Demo Company (CompanyId 1).
+    /// Uses deterministic DEMO- keys so restarts do not duplicate forever.
+    /// </summary>
+    private async Task SeedRichDemoDataAsync(CancellationToken ct)
     {
         var companyId = await _db.Companies.OrderBy(c => c.Id).Select(c => (int?)c.Id).FirstOrDefaultAsync(ct);
         if (companyId is null) return;
 
-        if (!await _db.CrmAccounts.AnyAsync(ct))
+        // Serialize across web+api hosts so concurrent startup does not double-insert.
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+        await _db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(88442201);", ct);
+
+        const string owner = "admin";
+        var today = DateTime.UtcNow.Date;
+        _logger.LogInformation("Seeding rich CRM/Finance demo data for company {CompanyId}…", companyId);
+
+        // ——— Products ———
+        var productDefs = new (string Code, string Name, string Family, string Category, decimal Price, bool Active)[]
         {
-            _logger.LogInformation("Seeding CRM accounts, campaigns, products, quotes, cases…");
-            var account = new CrmAccount
+            ("DEMO-ERP-ANN", "ShaunERP Annual License", "Software", "Subscription", 240000m, true),
+            ("DEMO-ERP-IMPL", "Implementation & Onboarding", "Services", "Professional Services", 85000m, true),
+            ("DEMO-ERP-SUP", "Premium Support Plan", "Services", "Support", 48000m, true),
+            ("DEMO-ERP-ADD", "Extra User Pack (10 seats)", "Software", "Add-on", 36000m, true),
+            ("DEMO-ERP-LEGACY", "Legacy Connector (retired)", "Software", "Integration", 12000m, false)
+        };
+        foreach (var p in productDefs)
+        {
+            if (await _db.CrmProducts.AnyAsync(x => x.CompanyId == companyId && x.ProductCode == p.Code, ct))
+                continue;
+            _db.CrmProducts.Add(new CrmProduct
             {
                 CompanyId = companyId,
-                AccountOwner = "admin",
-                AccountName = "Only41 Partners",
-                AccountNumber = "ACC-1001",
-                AccountType = "Customer",
-                Industry = "Professional Services",
-                Website = "https://only41.example",
-                Phone = "+91 44 2222 3333",
-                Email = "hello@only41.example",
-                Rating = "Hot",
-                Territory = "South India",
-                BillingCity = "Chennai",
-                BillingCountry = "India",
-                PaymentTerms = "Net 30",
-                CreditLimit = 500000
-            };
-            _db.CrmAccounts.Add(account);
-            await _db.SaveChangesAsync(ct);
+                ProductCode = p.Code,
+                Name = p.Name,
+                ProductFamily = p.Family,
+                Category = p.Category,
+                UnitPrice = p.Price,
+                CurrencyCode = "INR",
+                IsActive = p.Active,
+                UnitOfMeasure = p.Family == "Software" ? "License" : "Each",
+                TaxRate = 18,
+                Description = $"Demo catalog item {p.Code}",
+                Status = p.Active ? "Active" : "Inactive"
+            });
+        }
+        await _db.SaveChangesAsync(ct);
+        var products = await _db.CrmProducts.Where(p => p.CompanyId == companyId && p.ProductCode.StartsWith("DEMO-")).ToListAsync(ct);
+        var prodAnn = products.First(p => p.ProductCode == "DEMO-ERP-ANN");
+        var prodImpl = products.First(p => p.ProductCode == "DEMO-ERP-IMPL");
+        var prodSup = products.First(p => p.ProductCode == "DEMO-ERP-SUP");
 
+        // ——— Campaigns ———
+        var campaignDefs = new (string Name, string Type, string Status, int StartOffset, int EndOffset, decimal Budget, decimal Expected)[]
+        {
+            ("DEMO: Q1 Pipeline Push", "Email", "Completed", -90, -30, 45000m, 350000m),
+            ("DEMO: Mid-Market Webinar Series", "Webinar", "Active", -14, 45, 75000m, 500000m),
+            ("DEMO: Partner Co-sell Kickoff", "Partner", "Planning", 10, 60, 30000m, 200000m)
+        };
+        foreach (var c in campaignDefs)
+        {
+            if (await _db.Campaigns.AnyAsync(x => x.CompanyId == companyId && x.Name == c.Name, ct))
+                continue;
             _db.Campaigns.Add(new Campaign
             {
                 CompanyId = companyId,
-                CampaignOwner = "admin",
-                Name = "Q3 ERP Awareness",
-                CampaignType = "Webinar",
-                CampaignStatus = "Active",
-                StartDate = DateTime.UtcNow.AddDays(-14),
-                EndDate = DateTime.UtcNow.AddDays(45),
-                BudgetedCost = 75000,
-                ExpectedRevenue = 500000,
-                ExpectedResponse = 120,
-                NumSent = 850,
-                Description = "Webinar + nurture for mid-market ERP buyers."
+                CampaignOwner = owner,
+                Name = c.Name,
+                CampaignType = c.Type,
+                CampaignStatus = c.Status,
+                StartDate = today.AddDays(c.StartOffset),
+                EndDate = today.AddDays(c.EndOffset),
+                BudgetedCost = c.Budget,
+                ActualCost = c.Status == "Completed" ? c.Budget * 0.92m : c.Status == "Active" ? c.Budget * 0.4m : 0,
+                ExpectedRevenue = c.Expected,
+                ExpectedResponse = 80,
+                NumSent = c.Status == "Planning" ? 0 : 850,
+                Description = "Demo marketing campaign."
             });
+        }
+        await _db.SaveChangesAsync(ct);
+        var activeCampaign = await _db.Campaigns.FirstAsync(c => c.CompanyId == companyId && c.Name == "DEMO: Mid-Market Webinar Series", ct);
 
-            var product = new CrmProduct
+        // ——— Accounts ———
+        var accountDefs = new (string Number, string Name, string Type, string Industry, string City, string Rating, string Terms, decimal Credit, string Owner)[]
+        {
+            ("DEMO-ACC-01", "Only41 Partners", "Customer", "Professional Services", "Chennai", "Hot", "Net 30", 500000m, owner),
+            ("DEMO-ACC-02", "Harbor Logistics India", "Customer", "Logistics", "Mumbai", "Warm", "Net 45", 750000m, "Rajesh Sales"),
+            ("DEMO-ACC-03", "GreenLeaf Organics", "Customer", "Agriculture", "Coimbatore", "Warm", "Net 15", 200000m, owner),
+            ("DEMO-ACC-04", "NovaTech Systems", "Prospect", "Technology", "Bengaluru", "Hot", "Net 30", 400000m, "Meera Sales"),
+            ("DEMO-ACC-05", "Coastal Retail Group", "Customer", "Retail", "Kochi", "Cold", "Due on Receipt", 150000m, owner),
+            ("DEMO-ACC-06", "Apex Manufacturing Co", "Partner", "Manufacturing", "Pune", "Warm", "Net 60", 1000000m, "Rajesh Sales")
+        };
+        foreach (var a in accountDefs)
+        {
+            if (await _db.CrmAccounts.AnyAsync(x => x.CompanyId == companyId && (x.AccountNumber == a.Number || x.AccountName == a.Name), ct))
+            {
+                // Backfill deterministic number on pre-existing demo account
+                var existing = await _db.CrmAccounts.FirstOrDefaultAsync(
+                    x => x.CompanyId == companyId && x.AccountName == a.Name && (x.AccountNumber == null || !x.AccountNumber.StartsWith("DEMO-")), ct);
+                if (existing is not null && !await _db.CrmAccounts.AnyAsync(x => x.CompanyId == companyId && x.AccountNumber == a.Number, ct))
+                    existing.AccountNumber = a.Number;
+                continue;
+            }
+            _db.CrmAccounts.Add(new CrmAccount
             {
                 CompanyId = companyId,
-                ProductCode = "ERP-ANN",
-                Name = "ShaunERP Annual License",
-                ProductFamily = "Software",
-                Category = "Subscription",
-                UnitPrice = 240000,
-                CurrencyCode = "INR",
-                IsActive = true,
-                UnitOfMeasure = "License",
-                TaxRate = 18
-            };
-            _db.CrmProducts.Add(product);
-            await _db.SaveChangesAsync(ct);
+                AccountOwner = a.Owner,
+                AccountName = a.Name,
+                AccountNumber = a.Number,
+                AccountType = a.Type,
+                Industry = a.Industry,
+                Website = $"https://{a.Number.ToLowerInvariant()}.example",
+                Phone = "+91 44 2000 1000",
+                Email = $"hello@{a.Number.ToLowerInvariant()}.example",
+                Rating = a.Rating,
+                Territory = "South India",
+                BillingCity = a.City,
+                BillingState = "TN",
+                BillingCountry = "India",
+                PaymentTerms = a.Terms,
+                CreditLimit = a.Credit,
+                Employees = 50 + (a.Number.GetHashCode() % 200),
+                AnnualRevenue = a.Credit * 12,
+                Tags = "demo-seed"
+            });
+        }
+        await _db.SaveChangesAsync(ct);
+        var accounts = await _db.CrmAccounts.Where(a => a.CompanyId == companyId && a.AccountNumber!.StartsWith("DEMO-ACC-")).ToListAsync(ct);
 
-            var quote = new Quote
+        // ——— Customers (10) ———
+        var customerDefs = new (string Number, string Name, string Contact, string Email, string Phone, string Industry, string Terms, decimal Credit, string Owner, string Status, string? Addr)[]
+        {
+            ("CUST-DEMO-01", "Only41 Partners", "Suresh Nair", "billing@only41.example", "+91 44 2222 3333", "Professional Services", "Net 30", 500000m, owner, "Active", "12 Anna Salai, Chennai 600002"),
+            ("CUST-DEMO-02", "Harbor Logistics India", "Anita Desai", "ap@harborlog.example", "+91 22 4000 2200", "Logistics", "Net 45", 750000m, "Rajesh Sales", "Active", "Andheri East, Mumbai 400069"),
+            ("CUST-DEMO-03", "GreenLeaf Organics", "Karthik V", "finance@greenleaf.example", "+91 422 300 4500", "Agriculture", "Net 15", 200000m, owner, "Active", "RS Puram, Coimbatore 641002"),
+            ("CUST-DEMO-04", "Coastal Retail Group", "Deepa Menon", "accounts@coastalretail.example", "+91 484 220 1100", "Retail", "Due on Receipt", 150000m, owner, "Active", "MG Road, Kochi 682011"),
+            ("CUST-DEMO-05", "Apex Manufacturing Co", "Vikram Shah", "billing@apexmfg.example", "+91 20 6600 8800", "Manufacturing", "Net 60", 1000000m, "Rajesh Sales", "Active", "Hinjewadi, Pune 411057"),
+            ("CUST-DEMO-06", "BrightPath Education", "Lakshmi Rao", "billing@brightpath.example", "+91 80 4111 2200", "Education", "Net 30", 300000m, "Meera Sales", "Active", "Indiranagar, Bengaluru 560038"),
+            ("CUST-DEMO-07", "MediCare Clinics Network", "Dr. Arjun Patel", "finance@medicare.example", "+91 79 2650 3300", "Healthcare", "Net 30", 450000m, owner, "Active", "Navrangpura, Ahmedabad 380009"),
+            ("CUST-DEMO-08", "Skyline Construction Ltd", "Ramesh Iyer", "ap@skyline.example", "+91 44 2811 9900", "Construction", "Net 45", 600000m, "Rajesh Sales", "Active", "Guindy, Chennai 600032"),
+            ("CUST-DEMO-09", "PixelCraft Studios", "Nisha Banerjee", "hello@pixelcraft.example", "+91 33 4007 1200", "Media", "Net 15", 120000m, "Meera Sales", "Inactive", "Salt Lake, Kolkata 700091"),
+            ("CUST-DEMO-10", "Northwind Traders IN", "Thomas Fernandes", "billing@northwind.example", "+91 832 245 6700", "Wholesale", "Net 30", 280000m, owner, "Active", "Panaji, Goa 403001")
+        };
+        foreach (var c in customerDefs)
+        {
+            if (await _db.CrmCustomers.AnyAsync(x => x.CompanyId == companyId && x.AccountNumber == c.Number, ct))
+                continue;
+            var linkedAccount = accounts.FirstOrDefault(a =>
+                string.Equals(a.AccountName, c.Name, StringComparison.OrdinalIgnoreCase));
+            _db.CrmCustomers.Add(new Customer
             {
                 CompanyId = companyId,
-                QuoteOwner = "admin",
-                QuoteNumber = $"Q-{DateTime.UtcNow:yyyyMMdd}-1001",
-                Subject = "ShaunERP Annual — Only41",
-                QuoteStage = "Presented",
-                ValidUntil = DateTime.UtcNow.AddDays(21),
-                AccountName = account.AccountName,
-                AccountId = account.Id,
-                ContactName = "Meera Iyer",
+                CompanyName = c.Name,
+                PrimaryContact = c.Contact,
+                Email = c.Email,
+                PhoneNumber = c.Phone,
+                BillingAddress = c.Addr,
+                ShippingAddress = c.Addr,
+                PaymentTerms = c.Terms,
+                CreditLimit = c.Credit,
+                TaxId = $"33AAAAA{c.Number[^2..]}Z5",
+                CustomerOwner = c.Owner,
+                AccountNumber = c.Number,
+                Industry = c.Industry,
+                Website = $"https://{c.Number.ToLowerInvariant()}.example",
+                CustomerType = "Business",
+                Rating = c.Status == "Inactive" ? "Cold" : "Warm",
+                Territory = "India",
+                AccountId = linkedAccount?.Id,
+                Tags = "demo-seed",
+                Description = "Demo CRM customer for invoicing and AR screens.",
+                Status = c.Status
+            });
+        }
+        await _db.SaveChangesAsync(ct);
+        var customers = await _db.CrmCustomers.Where(c => c.CompanyId == companyId && c.AccountNumber!.StartsWith("CUST-DEMO-")).ToListAsync(ct);
+        Customer Cust(string n) => customers.First(c => c.AccountNumber == n);
+
+        // ——— Leads ———
+        var leadDefs = new (string Email, string First, string Last, string Company, string Status, string Source, string Industry, string Rating, bool Qualified, string City, string Owner)[]
+        {
+            ("demo.lead.new@chennairetail.example", "Priya", "Sharma", "Chennai Retail Pvt Ltd", "New", "Website", "Retail", "Hot", false, "Chennai", owner),
+            ("demo.lead.qualified@novatech.example", "Rahul", "Mehta", "NovaTech Systems", "Qualified", "Webinar", "Technology", "Hot", true, "Bengaluru", "Meera Sales"),
+            ("demo.lead.converted@brightpath.example", "Sneha", "Krishnan", "BrightPath Education", "Converted", "Referral", "Education", "Warm", true, "Bengaluru", owner),
+            ("demo.lead.lost@oldco.example", "Imran", "Khan", "OldCo Textiles", "Lost", "Cold Call", "Manufacturing", "Cold", false, "Tirupur", "Rajesh Sales"),
+            ("demo.lead.contacted@foodhub.example", "Aisha", "Begum", "FoodHub Cloud Kitchens", "Contacted", "Trade Show", "Hospitality", "Warm", false, "Hyderabad", owner),
+            ("demo.lead.nurture@fintech.example", "Daniel", "Joseph", "PayWave Fintech", "Nurture", "Partner", "Financial Services", "Hot", false, "Mumbai", "Meera Sales")
+        };
+        foreach (var l in leadDefs)
+        {
+            if (await _db.Leads.AnyAsync(x => x.CompanyId == companyId && x.Email == l.Email, ct))
+                continue;
+            _db.Leads.Add(new Lead
+            {
+                CompanyId = companyId,
+                LeadOwner = l.Owner,
+                FirstName = l.First,
+                LastName = l.Last,
+                Title = "Decision Maker",
+                CompanyName = l.Company,
+                Email = l.Email,
+                Phone = "+91 44 4000 1000",
+                Mobile = "+91 98765 40000",
+                LeadSource = l.Source,
+                Industry = l.Industry,
+                LeadStatus = l.Status,
+                Rating = l.Rating,
+                IsQualified = l.Qualified,
+                City = l.City,
+                State = "India",
+                Country = "India",
+                AnnualRevenue = 2500000,
+                NoOfEmployees = 120,
+                Score = l.Status == "Lost" ? 15 : l.Qualified ? 78 : 45,
+                CampaignId = activeCampaign.Id,
+                Territory = "South India",
+                Tags = "demo-seed",
+                Description = $"Demo lead — {l.Status}."
+            });
+        }
+        await _db.SaveChangesAsync(ct);
+        var leads = await _db.Leads.Where(l => l.CompanyId == companyId && l.Email != null && l.Email.StartsWith("demo.lead.")).ToListAsync(ct);
+
+        // ——— Prospects ———
+        var prospectDefs = new (string Email, string First, string Last, string Company, string Stage, string Source, string Industry, string? LeadEmail)[]
+        {
+            ("demo.prospect.arun@merlin.example", "Arun", "Kumar", "Merlin Analytics", "Engaged", "Website", "Technology", null),
+            ("demo.prospect.rahul@novatech.example", "Rahul", "Mehta", "NovaTech Systems", "Proposal", "Webinar", "Technology", "demo.lead.qualified@novatech.example"),
+            ("demo.prospect.aisha@foodhub.example", "Aisha", "Begum", "FoodHub Cloud Kitchens", "Discovery", "Trade Show", "Hospitality", "demo.lead.contacted@foodhub.example"),
+            ("demo.prospect.daniel@paywave.example", "Daniel", "Joseph", "PayWave Fintech", "Negotiation", "Partner", "Financial Services", "demo.lead.nurture@fintech.example")
+        };
+        foreach (var p in prospectDefs)
+        {
+            if (await _db.Prospects.AnyAsync(x => x.CompanyId == companyId && x.Email == p.Email, ct))
+                continue;
+            int? leadId = null;
+            if (p.LeadEmail is not null)
+            {
+                var lead = leads.FirstOrDefault(l => l.Email == p.LeadEmail);
+                leadId = lead?.Id;
+            }
+            _db.Prospects.Add(new Prospect
+            {
+                CompanyId = companyId,
+                CompanyName = p.Company,
+                FirstName = p.First,
+                LastName = p.Last,
+                Email = p.Email,
+                PhoneNumber = "+91 90000 20000",
+                LeadId = leadId,
+                ProspectOwner = owner,
+                Stage = p.Stage,
+                Source = p.Source,
+                Industry = p.Industry,
+                Territory = "India",
+                ExpectedCloseDate = today.AddDays(45),
+                AccountId = accounts.FirstOrDefault(a => a.AccountName == p.Company)?.Id,
+                Tags = "demo-seed",
+                Description = $"Demo prospect — {p.Stage}."
+            });
+        }
+        await _db.SaveChangesAsync(ct);
+        var prospects = await _db.Prospects.Where(p => p.CompanyId == companyId && p.Email != null && p.Email.StartsWith("demo.prospect.")).ToListAsync(ct);
+
+        // ——— Contacts ———
+        var contactDefs = new (string Email, string First, string Last, string Title, string AccountName, string? CustNo, string Owner, bool Primary)[]
+        {
+            ("meera@only41.example", "Meera", "Iyer", "CFO", "Only41 Partners", "CUST-DEMO-01", owner, true),
+            ("suresh@only41.example", "Suresh", "Nair", "CEO", "Only41 Partners", "CUST-DEMO-01", owner, false),
+            ("anita@harborlog.example", "Anita", "Desai", "Finance Head", "Harbor Logistics India", "CUST-DEMO-02", "Rajesh Sales", true),
+            ("karthik@greenleaf.example", "Karthik", "Venkat", "Operations", "GreenLeaf Organics", "CUST-DEMO-03", owner, true),
+            ("rahul.c@novatech.example", "Rahul", "Mehta", "CTO", "NovaTech Systems", null, "Meera Sales", true),
+            ("deepa@coastalretail.example", "Deepa", "Menon", "Procurement", "Coastal Retail Group", "CUST-DEMO-04", owner, true),
+            ("vikram@apexmfg.example", "Vikram", "Shah", "Plant Director", "Apex Manufacturing Co", "CUST-DEMO-05", "Rajesh Sales", true),
+            ("lakshmi@brightpath.example", "Lakshmi", "Rao", "Registrar", "BrightPath Education", "CUST-DEMO-06", "Meera Sales", true)
+        };
+        foreach (var c in contactDefs)
+        {
+            if (await _db.Contacts.AnyAsync(x => x.CompanyId == companyId && x.Email == c.Email, ct))
+                continue;
+            var acct = accounts.FirstOrDefault(a => a.AccountName == c.AccountName);
+            var cust = c.CustNo is null ? null : customers.FirstOrDefault(x => x.AccountNumber == c.CustNo);
+            _db.Contacts.Add(new Contact
+            {
+                CompanyId = companyId,
+                ContactOwner = c.Owner,
+                FirstName = c.First,
+                LastName = c.Last,
+                Title = c.Title,
+                Department = "Finance",
+                AccountName = c.AccountName,
+                Email = c.Email,
+                Phone = "+91 44 2222 3000",
+                Mobile = "+91 98800 11000",
+                CustomerId = cust?.Id,
+                AccountId = acct?.Id,
+                IsPrimary = c.Primary,
+                MailingCity = acct?.BillingCity,
+                MailingCountry = "India",
+                LeadSource = "Demo",
+                Tags = "demo-seed",
+                PreferredContactMethod = "Email"
+            });
+        }
+        await _db.SaveChangesAsync(ct);
+        var contacts = await _db.Contacts.Where(c => c.CompanyId == companyId && c.Tags == "demo-seed").ToListAsync(ct);
+
+        // ——— Opportunities ———
+        var oppDefs = new (string Name, string Account, string Stage, double Prob, decimal Amount, int CloseDays, string Type, string Forecast, string? LeadEmail, string? CustNo)[]
+        {
+            ("DEMO: ShaunERP Annual — Chennai Retail", "Chennai Retail Pvt Ltd", "Qualification", 25, 240000m, 30, "New Business", "Pipeline", "demo.lead.new@chennairetail.example", null),
+            ("DEMO: NovaTech Full Suite", "NovaTech Systems", "Proposal", 55, 420000m, 21, "New Business", "Best Case", "demo.lead.qualified@novatech.example", null),
+            ("DEMO: Harbor Logistics Expansion", "Harbor Logistics India", "Negotiation", 75, 310000m, 14, "Existing Business", "Commit", null, "CUST-DEMO-02"),
+            ("DEMO: Apex Manufacturing Rollout", "Apex Manufacturing Co", "Closed Won", 100, 580000m, -10, "New Business", "Closed", null, "CUST-DEMO-05"),
+            ("DEMO: OldCo Textiles — lost", "OldCo Textiles", "Closed Lost", 0, 180000m, -20, "New Business", "Omitted", "demo.lead.lost@oldco.example", null),
+            ("DEMO: PayWave Multi-entity", "PayWave Fintech", "Needs Analysis", 40, 650000m, 45, "New Business", "Pipeline", "demo.lead.nurture@fintech.example", null)
+        };
+        foreach (var o in oppDefs)
+        {
+            if (await _db.Opportunities.AnyAsync(x => x.CompanyId == companyId && x.DealName == o.Name, ct))
+                continue;
+            var acct = accounts.FirstOrDefault(a => a.AccountName == o.Account);
+            var lead = o.LeadEmail is null ? null : leads.FirstOrDefault(l => l.Email == o.LeadEmail);
+            var cust = o.CustNo is null ? null : customers.FirstOrDefault(c => c.AccountNumber == o.CustNo);
+            var contact = contacts.FirstOrDefault(c => c.AccountName == o.Account);
+            _db.Opportunities.Add(new Opportunity
+            {
+                CompanyId = companyId,
+                DealOwner = owner,
+                DealName = o.Name,
+                AccountName = o.Account,
+                Type = o.Type,
+                Amount = o.Amount,
+                ClosingDate = today.AddDays(o.CloseDays),
+                Probability = o.Prob,
+                ExpectedRevenue = Math.Round(o.Amount * (decimal)(o.Prob / 100.0), 2),
+                Pipeline = "Standard",
+                Stage = o.Stage,
+                LeadId = lead?.Id,
+                CustomerId = cust?.Id,
+                AccountId = acct?.Id,
+                ContactId = contact?.Id,
+                ContactName = contact is null ? null : $"{contact.FirstName} {contact.LastName}",
+                CampaignId = activeCampaign.Id,
+                CampaignSource = activeCampaign.Name,
+                ForecastCategory = o.Forecast,
                 CurrencyCode = "INR",
-                Terms = "Net 30. Includes onboarding.",
+                Territory = "India",
+                Tags = "demo-seed",
+                ActualCloseDate = o.Stage.StartsWith("Closed") ? today.AddDays(o.CloseDays) : null,
+                ActualRevenue = o.Stage == "Closed Won" ? o.Amount : null,
+                WinLossReason = o.Stage == "Closed Lost" ? "Budget freeze" : o.Stage == "Closed Won" ? "Best fit / references" : null,
+                NextStep = o.Stage.StartsWith("Closed") ? null : "Schedule stakeholder demo",
+                Description = $"Demo opportunity — {o.Stage}."
+            });
+        }
+        await _db.SaveChangesAsync(ct);
+        var opps = await _db.Opportunities.Where(o => o.CompanyId == companyId && o.DealName.StartsWith("DEMO:")).ToListAsync(ct);
+
+        // ——— Quotes ———
+        var quoteDefs = new (string Number, string Subject, string Stage, string AccountName, string? CustNo, decimal Subtotal)[]
+        {
+            ("DEMO-Q-1001", "DEMO Draft — Coastal Retail starter", "Draft", "Coastal Retail Group", "CUST-DEMO-04", 120000m),
+            ("DEMO-Q-1002", "DEMO Sent — Harbor Logistics expansion", "Sent", "Harbor Logistics India", "CUST-DEMO-02", 310000m),
+            ("DEMO-Q-1003", "DEMO Accepted — Apex Manufacturing", "Accepted", "Apex Manufacturing Co", "CUST-DEMO-05", 580000m),
+            ("DEMO-Q-1004", "DEMO Presented — NovaTech suite", "Presented", "NovaTech Systems", null, 420000m)
+        };
+        foreach (var q in quoteDefs)
+        {
+            if (await _db.Quotes.AnyAsync(x => x.CompanyId == companyId && x.QuoteNumber == q.Number, ct))
+                continue;
+            var acct = accounts.FirstOrDefault(a => a.AccountName == q.AccountName);
+            var cust = q.CustNo is null ? null : customers.FirstOrDefault(c => c.AccountNumber == q.CustNo);
+            var contact = contacts.FirstOrDefault(c => c.AccountName == q.AccountName);
+            var opp = opps.FirstOrDefault(o => o.AccountName == q.AccountName);
+            var tax = Math.Round(q.Subtotal * 0.18m, 2);
+            _db.Quotes.Add(new Quote
+            {
+                CompanyId = companyId,
+                QuoteOwner = owner,
+                QuoteNumber = q.Number,
+                Subject = q.Subject,
+                QuoteStage = q.Stage,
+                ValidUntil = today.AddDays(21),
+                AccountName = q.AccountName,
+                AccountId = acct?.Id,
+                ContactName = contact is null ? null : $"{contact.FirstName} {contact.LastName}",
+                ContactId = contact?.Id,
+                CustomerId = cust?.Id,
+                OpportunityId = opp?.Id,
+                CurrencyCode = "INR",
+                Terms = "Net 30. Includes standard onboarding.",
+                Subtotal = q.Subtotal,
+                Tax = tax,
+                GrandTotal = q.Subtotal + tax,
+                Description = "Demo quote.",
                 Lines =
                 [
                     new QuoteLine
                     {
                         CompanyId = companyId,
-                        ProductId = product.Id,
-                        ProductName = product.Name,
+                        ProductId = prodAnn.Id,
+                        ProductName = prodAnn.Name,
                         Quantity = 1,
-                        UnitPrice = product.UnitPrice,
-                        LineTotal = product.UnitPrice,
+                        UnitPrice = Math.Min(prodAnn.UnitPrice, q.Subtotal),
+                        LineTotal = Math.Min(prodAnn.UnitPrice, q.Subtotal),
                         SortOrder = 1
                     }
                 ]
-            };
-            quote.Subtotal = 240000;
-            quote.Tax = 43200;
-            quote.GrandTotal = 283200;
-            _db.Quotes.Add(quote);
+            });
+        }
+        await _db.SaveChangesAsync(ct);
 
+        // ——— Cases ———
+        var caseDefs = new (string Number, string Subject, string Type, string Priority, string Status, string AccountName, string? CustNo, bool Closed)[]
+        {
+            ("DEMO-CAS-1001", "Need SSO configuration help", "Problem", "High", "New", "Only41 Partners", "CUST-DEMO-01", false),
+            ("DEMO-CAS-1002", "Invoice PDF branding request", "Request", "Medium", "In Progress", "Harbor Logistics India", "CUST-DEMO-02", false),
+            ("DEMO-CAS-1003", "Login MFA reset", "Question", "Low", "Closed", "GreenLeaf Organics", "CUST-DEMO-03", true),
+            ("DEMO-CAS-1004", "Module access for finance team", "Problem", "Critical", "Escalated", "Apex Manufacturing Co", "CUST-DEMO-05", false),
+            ("DEMO-CAS-1005", "Report export timeout", "Problem", "Medium", "Closed", "Coastal Retail Group", "CUST-DEMO-04", true)
+        };
+        foreach (var c in caseDefs)
+        {
+            if (await _db.CrmCases.AnyAsync(x => x.CompanyId == companyId && x.CaseNumber == c.Number, ct))
+                continue;
+            var acct = accounts.FirstOrDefault(a => a.AccountName == c.AccountName);
+            var cust = c.CustNo is null ? null : customers.FirstOrDefault(x => x.AccountNumber == c.CustNo);
+            var contact = contacts.FirstOrDefault(x => x.AccountName == c.AccountName);
             _db.CrmCases.Add(new CrmCase
             {
                 CompanyId = companyId,
-                CaseOwner = "admin",
-                CaseNumber = $"CAS-{DateTime.UtcNow:yyyyMMdd}-1001",
-                Subject = "Need SSO configuration help",
-                CaseType = "Problem",
-                Priority = "High",
-                CaseStatus = "New",
+                CaseOwner = owner,
+                CaseNumber = c.Number,
+                Subject = c.Subject,
+                CaseType = c.Type,
+                Priority = c.Priority,
+                CaseStatus = c.Status,
                 Origin = "Email",
-                AccountName = account.AccountName,
-                AccountId = account.Id,
-                ContactName = "Meera Iyer",
-                Description = "Customer wants Azure AD SSO for CRM module."
+                AccountName = c.AccountName,
+                AccountId = acct?.Id,
+                ContactName = contact is null ? null : $"{contact.FirstName} {contact.LastName}",
+                ContactId = contact?.Id,
+                CustomerId = cust?.Id,
+                Description = $"Demo case — {c.Status} / {c.Priority}.",
+                Resolution = c.Closed ? "Resolved via knowledge base + screen share." : null,
+                ClosedDate = c.Closed ? today.AddDays(-3) : null,
+                Tags = "demo-seed"
             });
+        }
+        await _db.SaveChangesAsync(ct);
 
+        // ——— Tasks ———
+        var taskDefs = new (string Subject, CrmTaskStatus Status, string Priority, int DueDays, string Type, string To)[]
+        {
+            ("DEMO: Follow up CRM demo", CrmTaskStatus.NotStarted, "High", 2, "Call", "Priya Sharma"),
+            ("DEMO: Send Harbor proposal deck", CrmTaskStatus.InProgress, "Normal", 1, "Email", "Anita Desai"),
+            ("DEMO: Close Apex onboarding checklist", CrmTaskStatus.Completed, "Normal", -5, "To-do", "Vikram Shah"),
+            ("DEMO: Revisit OldCo in Q4", CrmTaskStatus.Deferred, "Low", 60, "Follow-up", "Imran Khan")
+        };
+        foreach (var t in taskDefs)
+        {
+            if (await _db.CrmTasks.AnyAsync(x => x.CompanyId == companyId && x.Subject == t.Subject, ct))
+                continue;
+            _db.CrmTasks.Add(new CrmTask
+            {
+                CompanyId = companyId,
+                TaskOwner = owner,
+                Subject = t.Subject,
+                DueDate = today.AddDays(t.DueDays),
+                TaskTo = t.To,
+                TaskType = t.Type,
+                Priority = t.Priority,
+                TaskStatus = t.Status,
+                Description = "Demo CRM task.",
+                RelatedEntityType = CrmRelatedTypes.Lead,
+                RelatedEntityId = leads.FirstOrDefault()?.Id
+            });
+        }
+
+        // ——— Meetings ———
+        var meetingDefs = new (string Title, int DayOffset, string Location, string Type, string Related)[]
+        {
+            ("DEMO: Discovery — Chennai Retail", 1, "Google Meet", "Online", "Lead: Priya Sharma"),
+            ("DEMO: Negotiation — Harbor Logistics", 3, "Mumbai office", "In-person", "Account: Harbor Logistics India"),
+            ("DEMO: QBReview — Apex Manufacturing", -2, "Zoom", "Online", "Customer: Apex Manufacturing Co")
+        };
+        foreach (var m in meetingDefs)
+        {
+            if (await _db.Meetings.AnyAsync(x => x.CompanyId == companyId && x.Title == m.Title, ct))
+                continue;
+            var from = today.AddDays(m.DayOffset).AddHours(10);
+            _db.Meetings.Add(new Meeting
+            {
+                CompanyId = companyId,
+                Title = m.Title,
+                Location = m.Location,
+                Host = owner,
+                Participants = $"{owner}, stakeholder@example.com",
+                RelatedTo = m.Related,
+                From = from,
+                To = from.AddHours(1),
+                MeetingType = m.Type,
+                Agenda = "Demo agenda: scope, timeline, commercials."
+            });
+        }
+
+        // ——— Calls ———
+        var callDefs = new (string Subject, string Type, string Purpose, string Result, string Contact, int HoursAgo)[]
+        {
+            ("DEMO: Discovery follow-up — Chennai Retail", "Outbound", "Prospecting", "Connected", "Priya Sharma", 5),
+            ("DEMO: Support callback — Only41 SSO", "Inbound", "Support", "Connected", "Meera Iyer", 28),
+            ("DEMO: No-answer — FoodHub", "Outbound", "Follow-up", "No Answer", "Aisha Begum", 50)
+        };
+        foreach (var c in callDefs)
+        {
+            if (await _db.CrmCalls.AnyAsync(x => x.CompanyId == companyId && x.Subject == c.Subject, ct))
+                continue;
             _db.CrmCalls.Add(new CrmCall
             {
                 CompanyId = companyId,
-                CallOwner = "admin",
-                Subject = "Discovery follow-up — Chennai Retail",
-                CallType = "Outbound",
-                CallPurpose = "Prospecting",
-                CallStart = DateTime.UtcNow.AddHours(-5),
-                DurationMinutes = 18,
-                CallResult = "Connected",
-                ContactName = "Priya Sharma",
+                CallOwner = owner,
+                Subject = c.Subject,
+                CallType = c.Type,
+                CallPurpose = c.Purpose,
+                CallStart = DateTime.UtcNow.AddHours(-c.HoursAgo),
+                DurationMinutes = c.Result == "No Answer" ? 0 : 18,
+                CallResult = c.Result,
+                ContactName = c.Contact,
                 PhoneNumber = "+91 98765 43210",
                 RelatedEntityType = CrmRelatedTypes.Lead,
-                Description = "Confirmed budget cycle and next demo date."
+                RelatedEntityId = leads.FirstOrDefault()?.Id,
+                Description = "Demo call log."
             });
+        }
 
-            var leadId = await _db.Leads.OrderBy(l => l.Id).Select(l => (int?)l.Id).FirstOrDefaultAsync(ct);
-            if (leadId is not null)
+        // ——— Notes ———
+        var noteDefs = new (string Title, string Body, string RelType, bool Pinned)[]
+        {
+            ("DEMO: Initial interest", "Lead came from website pricing page. Prefers morning calls IST.", CrmRelatedTypes.Lead, true),
+            ("DEMO: Budget note", "Customer confirmed FY budget includes ERP replacement.", CrmRelatedTypes.Customer, false),
+            ("DEMO: Case triage", "Escalated to product for MFA edge case on mobile.", CrmRelatedTypes.Case, false),
+            ("DEMO: Campaign insight", "Webinar CTR strong from logistics vertical.", CrmRelatedTypes.Campaign, false)
+        };
+        foreach (var n in noteDefs)
+        {
+            if (await _db.CrmNotes.AnyAsync(x => x.CompanyId == companyId && x.Title == n.Title, ct))
+                continue;
+            int relatedId = n.RelType switch
             {
-                _db.CrmNotes.Add(new CrmNote
-                {
-                    CompanyId = companyId,
-                    NoteOwner = "admin",
-                    Title = "Initial interest",
-                    Body = "Lead came from website pricing page. Prefers morning calls IST.",
-                    IsPinned = true,
-                    RelatedEntityType = CrmRelatedTypes.Lead,
-                    RelatedEntityId = leadId.Value
-                });
-            }
+                CrmRelatedTypes.Lead => leads.First().Id,
+                CrmRelatedTypes.Customer => customers.First().Id,
+                CrmRelatedTypes.Case => (await _db.CrmCases.Where(x => x.CompanyId == companyId && x.CaseNumber!.StartsWith("DEMO-")).Select(x => x.Id).FirstAsync(ct)),
+                CrmRelatedTypes.Campaign => activeCampaign.Id,
+                _ => leads.First().Id
+            };
+            _db.CrmNotes.Add(new CrmNote
+            {
+                CompanyId = companyId,
+                NoteOwner = owner,
+                Title = n.Title,
+                Body = n.Body,
+                IsPinned = n.Pinned,
+                RelatedEntityType = n.RelType,
+                RelatedEntityId = relatedId
+            });
+        }
+        await _db.SaveChangesAsync(ct);
 
+        // ——— Finance book + invoices ———
+        var book = await _db.CompanyMasters.FirstOrDefaultAsync(b => b.TenantCompanyId == companyId, ct);
+        if (book is null)
+        {
+            book = new CompanyMaster
+            {
+                TenantCompanyId = companyId,
+                Name = "Demo Company",
+                LegalName = "Demo Company LLC",
+                Currency = "INR",
+                InvoiceNumberPrefix = "INV-",
+                NextInvoiceSequence = 2001,
+                DefaultPaymentTerms = "Net 30",
+                DefaultDueDays = 30,
+                Email = "billing@demo.local",
+                TaxId = "US-TAX-DEMO",
+                BillingCity = "Chennai",
+                BillingCountry = "India"
+            };
+            _db.CompanyMasters.Add(book);
             await _db.SaveChangesAsync(ct);
         }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(book.InvoiceNumberPrefix)) book.InvoiceNumberPrefix = "INV-";
+            if (book.NextInvoiceSequence < 2001) book.NextInvoiceSequence = 2001;
+            if (book.DefaultDueDays <= 0) book.DefaultDueDays = 30;
+            await _db.SaveChangesAsync(ct);
+        }
+
+        // Ensure GL stubs exist
+        if (!await _db.Accounts.AnyAsync(a => a.CompanyMasterId == book.Id, ct))
+        {
+            _db.Accounts.AddRange(
+                new GlAccount { CompanyMasterId = book.Id, Name = "Cash", AccountNumber = "1000", Type = AccountType.Asset },
+                new GlAccount { CompanyMasterId = book.Id, Name = "Accounts Receivable", AccountNumber = "1100", Type = AccountType.Asset },
+                new GlAccount { CompanyMasterId = book.Id, Name = "Accounts Payable", AccountNumber = "2000", Type = AccountType.Liability },
+                new GlAccount { CompanyMasterId = book.Id, Name = "Sales Revenue", AccountNumber = "4000", Type = AccountType.Revenue },
+                new GlAccount { CompanyMasterId = book.Id, Name = "Operating Expense", AccountNumber = "5000", Type = AccountType.Expense });
+            await _db.SaveChangesAsync(ct);
+        }
+
+        async Task<Invoice?> EnsureDemoInvoiceAsync(
+            string number,
+            string custNo,
+            InvoiceStatus status,
+            DateTime invoiceDate,
+            DateTime dueDate,
+            decimal unitPrice,
+            decimal? payAmount = null,
+            string? payRef = null)
+        {
+            var existing = await _db.Invoices.Include(i => i.Payments)
+                .FirstOrDefaultAsync(i => i.CompanyMasterId == book.Id && i.InvoiceNumber == number, ct);
+            if (existing is not null) return existing;
+
+            var cust = Cust(custNo);
+            var qty = 1m;
+            var taxRate = 18m;
+            var net = InvoiceLine.LineNetAmount(qty, unitPrice, 0);
+            var taxAmt = Math.Round(net * (taxRate / 100m), 2);
+            var lineTotal = Math.Round(net + taxAmt, 2);
+
+            var inv = new Invoice
+            {
+                CompanyId = companyId,
+                CompanyMasterId = book.Id,
+                CustomerId = cust.Id,
+                CustomerName = cust.CompanyName,
+                InvoiceNumber = number,
+                InvoiceDate = invoiceDate,
+                DueDate = dueDate,
+                InvoiceStatus = status,
+                CurrencyCode = book.Currency is "USD" or "INR" ? "INR" : book.Currency,
+                PaymentTerms = cust.PaymentTerms ?? book.DefaultPaymentTerms,
+                Notes = "Demo invoice [demo-seed]",
+                BillToAddress = cust.BillingAddress,
+                Salesperson = cust.CustomerOwner ?? owner,
+                Terms = cust.PaymentTerms,
+                PurchaseOrderNumber = $"PO-{number[^4..]}",
+                Subtotal = net,
+                TaxTotal = taxAmt,
+                GrandTotal = lineTotal,
+                Amount = lineTotal,
+                AmountPaid = 0,
+                IsPaid = status == InvoiceStatus.Paid,
+                Lines =
+                [
+                    new InvoiceLine
+                    {
+                        CompanyId = companyId,
+                        ProductId = prodAnn.Id,
+                        ProductName = prodAnn.Name,
+                        Description = status == InvoiceStatus.Void ? "Voided demo line" : "Annual subscription / services",
+                        Quantity = qty,
+                        UnitPrice = unitPrice,
+                        TaxRate = taxRate,
+                        TaxAmount = taxAmt,
+                        LineTotal = lineTotal,
+                        SortOrder = 1,
+                        CreatedDate = DateTime.UtcNow
+                    }
+                ]
+            };
+
+            if (status is InvoiceStatus.PartiallyPaid or InvoiceStatus.Paid)
+            {
+                var paid = payAmount ?? (status == InvoiceStatus.Paid ? lineTotal : Math.Round(lineTotal * 0.4m, 2));
+                inv.AmountPaid = paid;
+                inv.IsPaid = status == InvoiceStatus.Paid;
+                inv.Payments.Add(new InvoicePayment
+                {
+                    CompanyId = companyId,
+                    Amount = paid,
+                    PaymentDate = invoiceDate.AddDays(5),
+                    Method = "Bank transfer",
+                    Reference = payRef ?? $"NEFT-{number}",
+                    Notes = status == InvoiceStatus.Paid ? "Full settlement" : "Partial payment on account"
+                });
+                if (status == InvoiceStatus.Paid && paid < lineTotal)
+                {
+                    inv.Payments.Add(new InvoicePayment
+                    {
+                        CompanyId = companyId,
+                        Amount = lineTotal - paid,
+                        PaymentDate = invoiceDate.AddDays(12),
+                        Method = "UPI",
+                        Reference = $"UPI-{number}",
+                        Notes = "Balance payment"
+                    });
+                    inv.AmountPaid = lineTotal;
+                }
+            }
+
+            _db.Invoices.Add(inv);
+            return inv;
+        }
+
+        await EnsureDemoInvoiceAsync("DEMO-INV-D01", "CUST-DEMO-04", InvoiceStatus.Draft, today.AddDays(-2), today.AddDays(28), 85000m);
+        await EnsureDemoInvoiceAsync("DEMO-INV-S01", "CUST-DEMO-01", InvoiceStatus.Sent, today.AddDays(-5), today.AddDays(25), 240000m);
+        await EnsureDemoInvoiceAsync("DEMO-INV-O01", "CUST-DEMO-03", InvoiceStatus.Sent, today.AddDays(-45), today.AddDays(-15), 120000m); // overdue
+        await EnsureDemoInvoiceAsync("DEMO-INV-P01", "CUST-DEMO-02", InvoiceStatus.PartiallyPaid, today.AddDays(-20), today.AddDays(10), 310000m, payAmount: 150000m, payRef: "NEFT-HARBOR-1");
+        await EnsureDemoInvoiceAsync("DEMO-INV-F01", "CUST-DEMO-05", InvoiceStatus.Paid, today.AddDays(-40), today.AddDays(-10), 580000m);
+        await EnsureDemoInvoiceAsync("DEMO-INV-V01", "CUST-DEMO-09", InvoiceStatus.Void, today.AddDays(-12), today.AddDays(18), 48000m);
+        await EnsureDemoInvoiceAsync("DEMO-INV-S02", "CUST-DEMO-06", InvoiceStatus.Sent, today.AddDays(-3), today.AddDays(27), 180000m);
+        await EnsureDemoInvoiceAsync("DEMO-INV-P02", "CUST-DEMO-07", InvoiceStatus.PartiallyPaid, today.AddDays(-18), today.AddDays(12), 220000m, payAmount: 50000m);
+
+        // Link legacy INV-1001 to a CRM customer if still unlinked
+        var legacy = await _db.Invoices.FirstOrDefaultAsync(i => i.CompanyMasterId == book.Id && i.InvoiceNumber == "INV-1001", ct);
+        if (legacy is not null && legacy.CustomerId is null)
+        {
+            var c1 = Cust("CUST-DEMO-01");
+            legacy.CustomerId = c1.Id;
+            legacy.CustomerName = c1.CompanyName;
+            legacy.BillToAddress = c1.BillingAddress;
+            legacy.Salesperson = c1.CustomerOwner;
+        }
+
+        await _db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        _logger.LogInformation("Rich CRM/Finance demo seed complete for company {CompanyId}.", companyId);
     }
 
     private static CompanyModule Module(int companyId, string key, string name) => new()
@@ -833,6 +1342,270 @@ public class DbSeeder
         })
         {
             await _db.Database.ExecuteSqlRawAsync(sql, ct);
+        }
+    }
+
+    private async Task EnsureFinanceSchemaAsync(CancellationToken ct)
+    {
+        foreach (var sql in new[]
+        {
+            """ALTER TABLE "CompanyMasters" ADD COLUMN IF NOT EXISTS "BillingStreet" text NULL;""",
+            """ALTER TABLE "CompanyMasters" ADD COLUMN IF NOT EXISTS "BillingCity" text NULL;""",
+            """ALTER TABLE "CompanyMasters" ADD COLUMN IF NOT EXISTS "BillingState" text NULL;""",
+            """ALTER TABLE "CompanyMasters" ADD COLUMN IF NOT EXISTS "BillingZip" text NULL;""",
+            """ALTER TABLE "CompanyMasters" ADD COLUMN IF NOT EXISTS "BillingCountry" text NULL;""",
+            """ALTER TABLE "CompanyMasters" ADD COLUMN IF NOT EXISTS "InvoiceNumberPrefix" text NOT NULL DEFAULT 'INV-';""",
+            """ALTER TABLE "CompanyMasters" ADD COLUMN IF NOT EXISTS "NextInvoiceSequence" integer NOT NULL DEFAULT 1001;""",
+            """ALTER TABLE "CompanyMasters" ADD COLUMN IF NOT EXISTS "DefaultPaymentTerms" text NULL;""",
+            """ALTER TABLE "CompanyMasters" ADD COLUMN IF NOT EXISTS "DefaultDueDays" integer NOT NULL DEFAULT 30;""",
+            """ALTER TABLE "Invoices" ADD COLUMN IF NOT EXISTS "CompanyId" integer NULL;""",
+            """ALTER TABLE "Invoices" ADD COLUMN IF NOT EXISTS "CustomerId" integer NULL;""",
+            """ALTER TABLE "Invoices" ADD COLUMN IF NOT EXISTS "CustomerName" text NULL;""",
+            """ALTER TABLE "Invoices" ADD COLUMN IF NOT EXISTS "InvoiceStatus" integer NOT NULL DEFAULT 0;""",
+            """ALTER TABLE "Invoices" ADD COLUMN IF NOT EXISTS "CurrencyCode" text NULL;""",
+            """ALTER TABLE "Invoices" ADD COLUMN IF NOT EXISTS "PaymentTerms" text NULL;""",
+            """ALTER TABLE "Invoices" ADD COLUMN IF NOT EXISTS "Subtotal" numeric(18,2) NOT NULL DEFAULT 0;""",
+            """ALTER TABLE "Invoices" ADD COLUMN IF NOT EXISTS "Discount" numeric(18,2) NOT NULL DEFAULT 0;""",
+            """ALTER TABLE "Invoices" ADD COLUMN IF NOT EXISTS "TaxTotal" numeric(18,2) NOT NULL DEFAULT 0;""",
+            """ALTER TABLE "Invoices" ADD COLUMN IF NOT EXISTS "GrandTotal" numeric(18,2) NOT NULL DEFAULT 0;""",
+            """ALTER TABLE "Invoices" ADD COLUMN IF NOT EXISTS "AmountPaid" numeric(18,2) NOT NULL DEFAULT 0;""",
+            """ALTER TABLE "Invoices" ADD COLUMN IF NOT EXISTS "PurchaseOrderNumber" text NULL;""",
+            """ALTER TABLE "Invoices" ADD COLUMN IF NOT EXISTS "BillToAddress" text NULL;""",
+            """ALTER TABLE "Invoices" ADD COLUMN IF NOT EXISTS "Salesperson" text NULL;""",
+            """ALTER TABLE "Invoices" ADD COLUMN IF NOT EXISTS "Terms" text NULL;""",
+            """ALTER TABLE "Invoices" ALTER COLUMN "FinanceCustomerId" DROP NOT NULL;"""
+        })
+        {
+            try { await _db.Database.ExecuteSqlRawAsync(sql, ct); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Finance schema statement skipped: {Sql}", sql); }
+        }
+
+        // Backfill totals from legacy Amount / IsPaid
+        try
+        {
+            await _db.Database.ExecuteSqlRawAsync("""
+                UPDATE "Invoices"
+                SET "GrandTotal" = "Amount",
+                    "Subtotal" = CASE WHEN "Subtotal" = 0 THEN "Amount" ELSE "Subtotal" END,
+                    "InvoiceStatus" = CASE WHEN "IsPaid" THEN 3 ELSE "InvoiceStatus" END,
+                    "AmountPaid" = CASE WHEN "IsPaid" THEN "Amount" ELSE "AmountPaid" END,
+                    "CurrencyCode" = COALESCE(NULLIF("CurrencyCode", ''), 'USD')
+                WHERE "GrandTotal" = 0 AND "Amount" <> 0;
+                """, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not backfill invoice totals");
+        }
+
+        await _db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS "InvoiceLines" (
+                "Id" SERIAL PRIMARY KEY,
+                "CreatedDate" timestamp with time zone NOT NULL,
+                "UpdatedDate" timestamp with time zone NULL,
+                "CreatedBy" text NULL, "ModifiedBy" text NULL, "Status" text NULL,
+                "CompanyId" integer NULL,
+                "InvoiceId" integer NOT NULL,
+                "ProductId" integer NULL,
+                "ProductName" text NOT NULL DEFAULT '',
+                "Description" text NULL,
+                "Quantity" numeric(18,2) NOT NULL DEFAULT 1,
+                "UnitPrice" numeric(18,2) NOT NULL DEFAULT 0,
+                "Discount" numeric(18,2) NOT NULL DEFAULT 0,
+                "TaxRate" numeric(18,2) NOT NULL DEFAULT 0,
+                "TaxAmount" numeric(18,2) NOT NULL DEFAULT 0,
+                "LineTotal" numeric(18,2) NOT NULL DEFAULT 0,
+                "SortOrder" integer NOT NULL DEFAULT 0
+            );
+            """, ct);
+
+        await _db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS "InvoicePayments" (
+                "Id" SERIAL PRIMARY KEY,
+                "CreatedDate" timestamp with time zone NOT NULL,
+                "UpdatedDate" timestamp with time zone NULL,
+                "CreatedBy" text NULL, "ModifiedBy" text NULL, "Status" text NULL,
+                "CompanyId" integer NULL,
+                "InvoiceId" integer NOT NULL,
+                "Amount" numeric(18,2) NOT NULL DEFAULT 0,
+                "PaymentDate" timestamp with time zone NOT NULL,
+                "Method" text NULL,
+                "Reference" text NULL,
+                "Notes" text NULL
+            );
+            """, ct);
+
+        await _db.Database.ExecuteSqlRawAsync("""
+            CREATE INDEX IF NOT EXISTS "IX_Invoices_CompanyId_InvoiceNumber"
+            ON "Invoices" ("CompanyId", "InvoiceNumber");
+            """, ct);
+
+        try
+        {
+            await _db.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "CompanyMasters" ADD COLUMN IF NOT EXISTS "OrderNumberPrefix" text NOT NULL DEFAULT 'SO-';""", ct);
+            await _db.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "CompanyMasters" ADD COLUMN IF NOT EXISTS "NextOrderSequence" integer NOT NULL DEFAULT 1001;""", ct);
+            await _db.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "Invoices" ADD COLUMN IF NOT EXISTS "SalesOrderId" integer NULL;""", ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not add sales-order columns to finance tables");
+        }
+    }
+
+    private async Task EnsureSalesOrderSchemaAsync(CancellationToken ct)
+    {
+        try
+        {
+            await _db.Database.ExecuteSqlRawAsync("""
+                CREATE TABLE IF NOT EXISTS "SalesOrders" (
+                    "Id" SERIAL PRIMARY KEY,
+                    "CreatedDate" timestamp with time zone NOT NULL,
+                    "UpdatedDate" timestamp with time zone NULL,
+                    "CreatedBy" text NULL, "ModifiedBy" text NULL, "Status" text NULL,
+                    "CompanyId" integer NULL,
+                    "CustomerId" integer NULL,
+                    "CustomerName" text NULL,
+                    "QuoteId" integer NULL,
+                    "OrderNumber" text NOT NULL DEFAULT '',
+                    "OrderDate" timestamp with time zone NOT NULL,
+                    "RequestedDeliveryDate" timestamp with time zone NULL,
+                    "OrderStatus" integer NOT NULL DEFAULT 0,
+                    "CurrencyCode" text NULL,
+                    "PaymentTerms" text NULL,
+                    "PurchaseOrderNumber" text NULL,
+                    "BillToAddress" text NULL,
+                    "ShipToAddress" text NULL,
+                    "Salesperson" text NULL,
+                    "Notes" text NULL,
+                    "Terms" text NULL,
+                    "Subtotal" numeric(18,2) NOT NULL DEFAULT 0,
+                    "Discount" numeric(18,2) NOT NULL DEFAULT 0,
+                    "TaxTotal" numeric(18,2) NOT NULL DEFAULT 0,
+                    "GrandTotal" numeric(18,2) NOT NULL DEFAULT 0,
+                    "AmountInvoiced" numeric(18,2) NOT NULL DEFAULT 0
+                );
+                """, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SalesOrders create skipped");
+        }
+
+        // EF maps enum Status -> column "Status" which collides with BaseEntity.Status text.
+        // Prefer renaming enum column to OrderStatus if present as Status1 from above, or ensure OrderStatus.
+        foreach (var sql in new[]
+        {
+            """ALTER TABLE "SalesOrders" ADD COLUMN IF NOT EXISTS "OrderStatus" integer NOT NULL DEFAULT 0;""",
+            """ALTER TABLE "CompanyMasters" ADD COLUMN IF NOT EXISTS "OrderNumberPrefix" text NOT NULL DEFAULT 'SO-';""",
+            """ALTER TABLE "CompanyMasters" ADD COLUMN IF NOT EXISTS "NextOrderSequence" integer NOT NULL DEFAULT 1001;""",
+            """ALTER TABLE "Invoices" ADD COLUMN IF NOT EXISTS "SalesOrderId" integer NULL;"""
+        })
+        {
+            try { await _db.Database.ExecuteSqlRawAsync(sql, ct); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Sales order schema statement skipped: {Sql}", sql); }
+        }
+
+        // Prefer OrderStatus column; migrate Status1 if an older patch created it.
+        try
+        {
+            await _db.Database.ExecuteSqlRawAsync("""
+                DO $$
+                BEGIN
+                  IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'SalesOrders' AND column_name = 'Status1'
+                  ) AND EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'SalesOrders' AND column_name = 'OrderStatus'
+                  ) THEN
+                    UPDATE "SalesOrders" SET "OrderStatus" = "Status1";
+                  ELSIF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'SalesOrders' AND column_name = 'Status1'
+                  ) THEN
+                    ALTER TABLE "SalesOrders" RENAME COLUMN "Status1" TO "OrderStatus";
+                  END IF;
+                END $$;
+                """, ct);
+        }
+        catch { /* ignore */ }
+
+        try
+        {
+            await _db.Database.ExecuteSqlRawAsync("""
+                CREATE TABLE IF NOT EXISTS "SalesOrderLines" (
+                    "Id" SERIAL PRIMARY KEY,
+                    "CreatedDate" timestamp with time zone NOT NULL,
+                    "UpdatedDate" timestamp with time zone NULL,
+                    "CreatedBy" text NULL, "ModifiedBy" text NULL, "Status" text NULL,
+                    "CompanyId" integer NULL,
+                    "SalesOrderId" integer NOT NULL,
+                    "ProductId" integer NULL,
+                    "ProductName" text NULL,
+                    "Description" text NULL,
+                    "Quantity" numeric(18,2) NOT NULL DEFAULT 1,
+                    "UnitPrice" numeric(18,2) NOT NULL DEFAULT 0,
+                    "Discount" numeric(18,2) NOT NULL DEFAULT 0,
+                    "TaxRate" numeric(18,2) NOT NULL DEFAULT 0,
+                    "TaxAmount" numeric(18,2) NOT NULL DEFAULT 0,
+                    "LineTotal" numeric(18,2) NOT NULL DEFAULT 0,
+                    "SortOrder" integer NOT NULL DEFAULT 0
+                );
+                """, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SalesOrderLines create skipped");
+        }
+
+        try
+        {
+            await _db.Database.ExecuteSqlRawAsync("""
+                CREATE INDEX IF NOT EXISTS "IX_SalesOrders_CompanyId_OrderNumber"
+                ON "SalesOrders" ("CompanyId", "OrderNumber");
+                """, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SalesOrders index create skipped");
+        }
+    }
+
+    private async Task AssignOrphanFinanceToFirstCompanyAsync(CancellationToken ct)
+    {
+        var companyId = await _db.Companies.OrderBy(c => c.Id).Select(c => (int?)c.Id).FirstOrDefaultAsync(ct);
+        if (companyId is null) return;
+
+        try
+        {
+            await _db.CompanyMasters
+                .Where(b => b.TenantCompanyId == null)
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.TenantCompanyId, companyId), ct);
+
+            var bookIds = await _db.CompanyMasters
+                .Where(b => b.TenantCompanyId == companyId)
+                .Select(b => b.Id)
+                .ToListAsync(ct);
+
+            if (bookIds.Count > 0)
+            {
+                await _db.Invoices
+                    .Where(i => i.CompanyId == null && bookIds.Contains(i.CompanyMasterId))
+                    .ExecuteUpdateAsync(s => s.SetProperty(x => x.CompanyId, companyId), ct);
+                await _db.InvoiceLines
+                    .Where(l => l.CompanyId == null)
+                    .ExecuteUpdateAsync(s => s.SetProperty(x => x.CompanyId, companyId), ct);
+                await _db.InvoicePayments
+                    .Where(p => p.CompanyId == null)
+                    .ExecuteUpdateAsync(s => s.SetProperty(x => x.CompanyId, companyId), ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not assign orphan finance rows to company {CompanyId}", companyId);
         }
     }
 }

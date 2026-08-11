@@ -5,6 +5,7 @@ using ShaunERP.Core.Finance;
 using ShaunERP.Core.Hrms;
 using ShaunERP.Core.Identity;
 using ShaunERP.Core.Projects;
+using ShaunERP.Core.Sales;
 
 namespace ShaunERP.Infrastructure.Persistence;
 
@@ -49,8 +50,14 @@ public class ShaunErpDbContext : DbContext
     public DbSet<ShaunERP.Core.Finance.Account> Accounts => Set<ShaunERP.Core.Finance.Account>();
     public DbSet<FinanceCustomer> FinanceCustomers => Set<FinanceCustomer>();
     public DbSet<Invoice> Invoices => Set<Invoice>();
+    public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();
+    public DbSet<InvoicePayment> InvoicePayments => Set<InvoicePayment>();
     public DbSet<Vendor> Vendors => Set<Vendor>();
     public DbSet<Bill> Bills => Set<Bill>();
+
+    // Sales orders
+    public DbSet<SalesOrder> SalesOrders => Set<SalesOrder>();
+    public DbSet<SalesOrderLine> SalesOrderLines => Set<SalesOrderLine>();
 
     // HRMS
     public DbSet<Department> Departments => Set<Department>();
@@ -95,8 +102,82 @@ public class ShaunErpDbContext : DbContext
         modelBuilder.Entity<ShaunERP.Core.Crm.Account>().ToTable("CrmAccounts");
 
         modelBuilder.Entity<Invoice>()
-            .HasIndex(x => new { x.CompanyMasterId, x.InvoiceNumber })
-            .IsUnique();
+            .HasIndex(x => new { x.CompanyId, x.InvoiceNumber });
+
+        modelBuilder.Entity<Invoice>()
+            .HasMany(x => x.Lines)
+            .WithOne(x => x.Invoice!)
+            .HasForeignKey(x => x.InvoiceId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<Invoice>()
+            .HasMany(x => x.Payments)
+            .WithOne(x => x.Invoice!)
+            .HasForeignKey(x => x.InvoiceId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<Invoice>()
+            .HasOne(x => x.Customer)
+            .WithMany()
+            .HasForeignKey(x => x.CustomerId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<Invoice>()
+            .HasOne(x => x.FinanceCustomer)
+            .WithMany()
+            .HasForeignKey(x => x.FinanceCustomerId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<InvoiceLine>()
+            .HasOne(x => x.Product)
+            .WithMany()
+            .HasForeignKey(x => x.ProductId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<Invoice>()
+            .Ignore(x => x.BalanceDue)
+            .Ignore(x => x.IsOverdue)
+            .Ignore(x => x.DisplayStatus);
+
+        modelBuilder.Entity<Invoice>()
+            .HasOne(x => x.SalesOrder)
+            .WithMany(x => x.Invoices)
+            .HasForeignKey(x => x.SalesOrderId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<SalesOrder>()
+            .HasIndex(x => new { x.CompanyId, x.OrderNumber });
+
+        modelBuilder.Entity<SalesOrder>()
+            .HasMany(x => x.Lines)
+            .WithOne(x => x.SalesOrder!)
+            .HasForeignKey(x => x.SalesOrderId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<SalesOrder>()
+            .HasOne(x => x.Customer)
+            .WithMany()
+            .HasForeignKey(x => x.CustomerId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<SalesOrder>()
+            .HasOne(x => x.Quote)
+            .WithMany()
+            .HasForeignKey(x => x.QuoteId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<SalesOrder>()
+            .Ignore(x => x.BalanceToInvoice)
+            .Ignore(x => x.DisplayStatus);
+
+        modelBuilder.Entity<SalesOrderLine>()
+            .HasOne(x => x.Product)
+            .WithMany()
+            .HasForeignKey(x => x.ProductId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<InvoiceLine>()
+            .Ignore(x => x.LineNet);
 
         modelBuilder.Entity<Lead>()
             .Property(x => x.AnnualRevenue)

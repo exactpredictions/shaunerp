@@ -292,7 +292,7 @@
             return NavLinkMatch.All;
 
         var trimmed = route.TrimEnd('/');
-        if (trimmed is "/crm" or "/users" or "/platform" or "/finance" or "/hrms" or "/projects")
+        if (trimmed is "/crm" or "/users" or "/platform" or "/finance" or "/orders" or "/hrms" or "/projects")
             return NavLinkMatch.All;
 
         return NavLinkMatch.Prefix;

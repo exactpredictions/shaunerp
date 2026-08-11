@@ -1,0 +1,87 @@
+@page "/finance"
+@attribute [Authorize]
+@using ShaunERP.Core.Finance
+@inject IFinanceService Finance
+@inject ITenantContext Tenant
+@inject IModuleRegistry Modules
+@inject ShellStateService Shell
+
+<PageTitle>Invoicing — ShaunERP</PageTitle>
+
+<section class="page">
+    <div class="breadcrumbs">
+        <a href="/">Home</a>
+        <span class="sep">/</span>
+        <span>Invoicing</span>
+    </div>
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">Finance · AR</p>
+            <h1>Invoicing workspace</h1>
+            <p class="muted">Receivables for @(Tenant.CompanyName ?? "your account").</p>
+        </div>
+        <div class="form-actions">
+            <a class="btn ghost" href="/finance/settings">Billing settings</a>
+            <a class="btn" href="/finance/invoices/new">New invoice</a>
+        </div>
+    </header>
+
+    @if (!_allowed)
+    {
+        <div class="error-state">Invoicing is not licensed for this account or you lack permission.</div>
+    }
+    else if (_loading)
+    {
+        <div class="loading-state">Loading finance dashboard…</div>
+    }
+    else if (_error is not null)
+    {
+        <div class="error-state">@_error</div>
+    }
+    else if (_stats is not null)
+    {
+        <div class="stat-grid crm-stats">
+            <a class="stat-card" href="/finance/invoices"><strong>@_stats.InvoiceCount</strong><span>Invoices</span></a>
+            <a class="stat-card" href="/finance/invoices"><strong>@_stats.DraftInvoices</strong><span>Draft</span></a>
+            <a class="stat-card" href="/finance/invoices"><strong>@_stats.SentInvoices</strong><span>Open / sent</span></a>
+            <a class="stat-card" href="/finance/invoices"><strong>@_stats.OverdueInvoices</strong><span>Overdue</span></a>
+            <a class="stat-card" href="/finance/invoices"><strong>@_stats.PaidInvoices</strong><span>Paid</span></a>
+            <div class="stat-card"><strong>@_stats.OutstandingBalance.ToString("N0")</strong><span>Outstanding</span></div>
+            <div class="stat-card"><strong>@_stats.InvoicedThisMonth.ToString("N0")</strong><span>Invoiced this month</span></div>
+            <a class="stat-card" href="/finance/payments"><strong>@_stats.CollectedThisMonth.ToString("N0")</strong><span>Collected this month</span></a>
+            <a class="stat-card" href="/finance/payments"><strong>@_stats.PaymentCount</strong><span>Payments</span></a>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private bool _allowed;
+    private string? _error;
+    private FinanceDashboardStats? _stats;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Shell.InitializeAsync();
+        var finance = Modules.GetByKey(ModuleKeys.Finance);
+        _allowed = finance is not null && Modules.CanAccessModule(finance, Tenant);
+        if (!_allowed)
+        {
+            _loading = false;
+            return;
+        }
+
+        try
+        {
+            _stats = await Finance.GetDashboardAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

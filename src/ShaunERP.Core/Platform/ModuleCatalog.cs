@@ -100,15 +100,61 @@ public static class ModuleCatalog
         {
             Key = ModuleKeys.Finance,
             Name = "Invoicing",
-            Description = "Customers, invoices, and payments — coming next",
+            Description = "AR invoicing: billing book, invoices, line items, and payments",
             Category = ModuleCategory.Finance,
             BaseRoute = "/finance",
             DashboardRoute = "/finance",
             Icon = "finance",
             RequiredEntitlement = ModuleKeys.Finance,
+            RequiredPermission = Permissions.FinanceAccess,
             DisplayOrder = 30,
-            IsPlaceholder = true,
-            IsEnabled = false
+            IsPlaceholder = false,
+            IsEnabled = true,
+            Dependencies = [ModuleKeys.Crm],
+            Permissions =
+            [
+                Permissions.FinanceAccess, Permissions.FinanceDashboardView,
+                Permissions.FinanceInvoicesView, Permissions.FinanceInvoicesCreate,
+                Permissions.FinanceInvoicesUpdate, Permissions.FinanceInvoicesDelete,
+                Permissions.FinanceInvoicesMarkPaid, Permissions.FinancePaymentsRecord,
+                Permissions.FinanceSettingsManage, Permissions.FinanceCustomersView
+            ],
+            NavigationItems =
+            [
+                new ModuleNavItem { Key = "finance.dashboard", Title = "Finance dashboard", Route = "/finance", Icon = "dashboard", RequiredPermission = Permissions.FinanceDashboardView, Group = "Overview", Order = 1 },
+                new ModuleNavItem { Key = "finance.invoices", Title = "Invoices", Route = "/finance/invoices", Icon = "invoice", RequiredPermission = Permissions.FinanceInvoicesView, Group = "Receivables", Order = 2 },
+                new ModuleNavItem { Key = "finance.payments", Title = "Payments", Route = "/finance/payments", Icon = "payment", RequiredPermission = Permissions.FinancePaymentsRecord, Group = "Receivables", Order = 3 },
+                new ModuleNavItem { Key = "finance.settings", Title = "Billing settings", Route = "/finance/settings", Icon = "settings", RequiredPermission = Permissions.FinanceSettingsManage, Group = "Setup", Order = 4 }
+            ]
+        },
+        new ModuleDefinition
+        {
+            Key = ModuleKeys.Orders,
+            Name = "Sales Orders",
+            Description = "Order-to-cash: sales orders, line items, confirm/fulfill, and invoice from order",
+            Category = ModuleCategory.CustomerAndSales,
+            BaseRoute = "/orders",
+            DashboardRoute = "/orders",
+            Icon = "orders",
+            RequiredEntitlement = ModuleKeys.Orders,
+            RequiredPermission = Permissions.OrdersAccess,
+            DisplayOrder = 35,
+            IsPlaceholder = false,
+            IsEnabled = true,
+            Dependencies = [ModuleKeys.Crm, ModuleKeys.Finance],
+            Permissions =
+            [
+                Permissions.OrdersAccess, Permissions.OrdersDashboardView,
+                Permissions.OrdersView, Permissions.OrdersCreate, Permissions.OrdersUpdate, Permissions.OrdersDelete,
+                Permissions.OrdersConfirm, Permissions.OrdersFulfill, Permissions.OrdersCancel,
+                Permissions.OrdersCreateInvoice
+            ],
+            NavigationItems =
+            [
+                new ModuleNavItem { Key = "orders.dashboard", Title = "Orders dashboard", Route = "/orders", Icon = "dashboard", RequiredPermission = Permissions.OrdersDashboardView, Group = "Overview", Order = 1 },
+                new ModuleNavItem { Key = "orders.list", Title = "Sales orders", Route = "/orders/list", Icon = "order", RequiredPermission = Permissions.OrdersView, Group = "Orders", Order = 2 },
+                new ModuleNavItem { Key = "orders.new", Title = "New order", Route = "/orders/new", Icon = "order-plus", RequiredPermission = Permissions.OrdersCreate, Group = "Orders", Order = 3 }
+            ]
         },
         new ModuleDefinition
         {

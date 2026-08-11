@@ -475,8 +475,141 @@ textarea { resize: vertical; }
   .app-shell.collapsed .sidebar-nav .nav-link { justify-content: flex-start; }
   .app-shell.collapsed .sidebar-toggle { display: none; }
 }
+/* —— Invoice master-detail editor —— */
+.invoice-edit .page-head-actions { display: flex; gap: .5rem; align-items: center; }
+.invoice-form { display: grid; gap: 1rem; max-width: 1180px; }
+.invoice-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.2rem 1.25rem;
+  box-shadow: var(--shadow);
+}
+.invoice-panel-head { margin-bottom: .85rem; }
+.invoice-panel-head h2 {
+  margin: 0;
+  font-size: .95rem;
+  font-weight: 650;
+  letter-spacing: .01em;
+}
+.invoice-panel-head .muted { margin: .2rem 0 0; font-size: .82rem; }
+.invoice-header-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .85rem;
+  margin-bottom: .85rem;
+}
+.invoice-span { display: grid; gap: .35rem; }
+.field-hint { font-size: .75rem; font-weight: 500; color: var(--muted); }
+.readonly-field {
+  background: var(--surface-muted) !important;
+  color: var(--muted);
+  cursor: default;
+}
+.invoice-dirty { color: var(--warning); font-weight: 650; }
+
+.invoice-lines-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.invoice-lines { width: 100%; border-collapse: collapse; min-width: 860px; }
+.invoice-lines th, .invoice-lines td {
+  padding: .45rem .55rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+  font-size: .88rem;
+}
+.invoice-lines th {
+  font-size: .68rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+  background: #fafbfc;
+  white-space: nowrap;
+}
+.invoice-lines input,
+.invoice-lines select {
+  padding: .45rem .5rem;
+  font-size: .88rem;
+  min-width: 0;
+}
+.invoice-lines .col-num { width: 2.4rem; text-align: center; color: var(--muted); }
+.invoice-lines .col-product { min-width: 8.5rem; width: 12rem; }
+.invoice-lines .col-desc { min-width: 12rem; }
+.invoice-lines .col-qty,
+.invoice-lines .col-price,
+.invoice-lines .col-disc,
+.invoice-lines .col-tax { width: 5.5rem; }
+.invoice-lines .col-amt {
+  width: 6.5rem;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.invoice-lines .col-actions { width: 2.5rem; text-align: center; }
+.invoice-lines .col-qty input,
+.invoice-lines .col-price input,
+.invoice-lines .col-disc input,
+.invoice-lines .col-tax input { text-align: right; }
+.invoice-empty-row td {
+  text-align: center;
+  padding: 1.25rem;
+  color: var(--muted);
+}
+.invoice-empty-row .btn { margin-left: .65rem; }
+.invoice-lines-footer { margin-top: .75rem; }
+.btn-icon {
+  width: 1.85rem; height: 1.85rem;
+  border-radius: 6px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--muted);
+  font: inherit; font-size: 1.1rem; line-height: 1; cursor: pointer;
+}
+.btn-icon.danger { color: var(--danger); border-color: rgba(187,0,0,.3); }
+.btn-icon:hover:not(:disabled) { background: var(--surface-muted); }
+.btn-icon:disabled { opacity: .4; cursor: not-allowed; }
+
+.invoice-footer-grid {
+  display: grid;
+  grid-template-columns: 1.4fr minmax(240px, .9fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+.invoice-notes { display: grid; gap: .85rem; }
+.invoice-totals {
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: .85rem 1rem;
+  display: grid;
+  gap: .55rem;
+}
+.tot-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .75rem;
+  font-size: .9rem;
+}
+.tot-row.tot-grand {
+  padding-top: .55rem;
+  border-top: 1px solid var(--line);
+  font-size: 1rem;
+}
+.tot-row.tot-balance strong { color: var(--brand-strong); }
+.tot-edit label { width: 100%; font-weight: 600; font-size: .82rem; }
+.tot-edit input { text-align: right; }
+.invoice-actions { margin-top: 1.1rem; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.invoice-payment-panel { margin-top: .25rem; max-width: 1180px; }
+
+@media (max-width: 900px) {
+  .invoice-header-grid { grid-template-columns: 1fr 1fr; }
+  .invoice-footer-grid { grid-template-columns: 1fr; }
+}
 @media (max-width: 700px) {
   .pipeline-board { grid-template-columns: minmax(220px, 1fr); }
+  .invoice-header-grid { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }

@@ -1,0 +1,47 @@
+@page "/orders"
+@attribute [Authorize]
+@inject ISalesOrderService Orders
+
+<PageTitle>Sales Orders — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">Sales Orders</p>
+            <h1>Orders workspace</h1>
+            <p class="muted">Confirm, fulfill, and invoice customer orders.</p>
+        </div>
+        <a class="btn" href="/orders/new">New order</a>
+    </header>
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (_error is not null) { <div class="error-state">@_error</div> }
+    else if (_stats is not null)
+    {
+        <div class="stat-grid crm-stats">
+            <div class="stat-card"><strong>@_stats.Draft</strong><span>Draft</span></div>
+            <div class="stat-card"><strong>@_stats.Confirmed</strong><span>Confirmed</span></div>
+            <div class="stat-card"><strong>@_stats.Fulfilled</strong><span>Fulfilled</span></div>
+            <div class="stat-card"><strong>@_stats.PartiallyInvoiced</strong><span>Partially invoiced</span></div>
+            <div class="stat-card"><strong>@_stats.Invoiced</strong><span>Invoiced</span></div>
+            <div class="stat-card"><strong>@_stats.OpenOrderValue.ToString("N0")</strong><span>Open to invoice</span></div>
+        </div>
+        <div class="form-actions" style="margin-top:1rem">
+            <a class="btn" href="/orders/list">View all orders</a>
+            <a class="btn ghost" href="/orders/new">Create order</a>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private SalesOrderDashboardStats? _stats;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _stats = await Orders.GetDashboardAsync(); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+}

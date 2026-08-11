@@ -1,8 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using ShaunERP.Core.Finance;
-using ShaunERP.Infrastructure.Persistence;
+using ShaunERP.Infrastructure.Services;
 
 namespace ShaunERP.Api.Controllers;
 
@@ -11,105 +10,134 @@ namespace ShaunERP.Api.Controllers;
 [Route("api/finance")]
 public class FinanceController : ControllerBase
 {
-    private readonly ShaunErpDbContext _db;
+    private readonly IFinanceService _finance;
 
-    public FinanceController(ShaunErpDbContext db) => _db = db;
+    public FinanceController(IFinanceService finance) => _finance = finance;
 
-    [HttpGet("books")]
-    public async Task<ActionResult<IEnumerable<CompanyMaster>>> GetBooks(CancellationToken ct)
-        => Ok(await _db.CompanyMasters.AsNoTracking().ToListAsync(ct));
+    [HttpGet("dashboard")]
+    public async Task<ActionResult<FinanceDashboardStats>> Dashboard(CancellationToken ct)
+        => Ok(await _finance.GetDashboardAsync(ct));
 
-    [HttpGet("accounts")]
-    public async Task<ActionResult<IEnumerable<Account>>> GetAccounts([FromQuery] int? companyMasterId, CancellationToken ct)
+    [HttpGet("book")]
+    public async Task<ActionResult<CompanyMaster>> GetBook(CancellationToken ct)
+        => Ok(await _finance.GetOrCreateBillingBookAsync(ct));
+
+    [HttpPut("book")]
+    public async Task<ActionResult<CompanyMaster>> UpdateBook([FromBody] CompanyMaster update, CancellationToken ct)
     {
-        var q = _db.Accounts.AsNoTracking().AsQueryable();
-        if (companyMasterId is not null)
-        {
-            q = q.Where(a => a.CompanyMasterId == companyMasterId);
-        }
-
-        return Ok(await q.OrderBy(a => a.AccountNumber).ToListAsync(ct));
+        var book = await _finance.UpdateBillingBookAsync(update, ct);
+        return book is null ? NotFound() : Ok(book);
     }
 
     [HttpGet("customers")]
-    public async Task<ActionResult<IEnumerable<FinanceCustomer>>> GetCustomers([FromQuery] int companyMasterId, CancellationToken ct)
-        => Ok(await _db.FinanceCustomers.AsNoTracking()
-            .Where(c => c.CompanyMasterId == companyMasterId)
-            .OrderBy(c => c.Name)
-            .ToListAsync(ct));
+    public async Task<IActionResult> GetCustomers(CancellationToken ct)
+        => Ok(await _finance.ListCrmCustomersAsync(ct));
 
-    [HttpPost("customers")]
-    public async Task<ActionResult<FinanceCustomer>> CreateCustomer([FromBody] FinanceCustomer customer, CancellationToken ct)
-    {
-        customer.Id = 0;
-        _db.FinanceCustomers.Add(customer);
-        await _db.SaveChangesAsync(ct);
-        return Ok(customer);
-    }
+    [HttpGet("products")]
+    public async Task<IActionResult> GetProducts(CancellationToken ct)
+        => Ok(await _finance.ListProductsAsync(ct));
 
     [HttpGet("invoices")]
-    public async Task<ActionResult<IEnumerable<Invoice>>> GetInvoices([FromQuery] int? companyMasterId, CancellationToken ct)
-    {
-        var q = _db.Invoices.AsNoTracking().Include(i => i.FinanceCustomer).AsQueryable();
-        if (companyMasterId is not null)
-        {
-            q = q.Where(i => i.CompanyMasterId == companyMasterId);
-        }
+    public async Task<ActionResult<IEnumerable<Invoice>>> GetInvoices(CancellationToken ct)
+        => Ok(await _finance.ListInvoicesAsync(ct));
 
-        return Ok(await q.OrderByDescending(i => i.Id).Take(200).ToListAsync(ct));
+    [HttpGet("invoices/{id:int}")]
+    public async Task<ActionResult<Invoice>> GetInvoice(int id, CancellationToken ct)
+    {
+        var invoice = await _finance.GetInvoiceAsync(id, ct);
+        return invoice is null ? NotFound() : Ok(invoice);
     }
 
     [HttpPost("invoices")]
     public async Task<ActionResult<Invoice>> CreateInvoice([FromBody] Invoice invoice, CancellationToken ct)
     {
-        invoice.Id = 0;
-        if (string.IsNullOrWhiteSpace(invoice.InvoiceNumber))
-        {
-            invoice.InvoiceNumber = $"INV-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}";
-        }
+        var created = await _finance.CreateInvoiceAsync(invoice, ct);
+        return CreatedAtAction(nameof(GetInvoice), new { id = created.Id }, created);
+    }
 
-        _db.Invoices.Add(invoice);
-        await _db.SaveChangesAsync(ct);
-        return Ok(invoice);
+    [HttpPut("invoices/{id:int}")]
+    public async Task<IActionResult> UpdateInvoice(int id, [FromBody] Invoice update, CancellationToken ct)
+    {
+        try
+        {
+            var updated = await _finance.UpdateInvoiceAsync(id, update, ct);
+            return updated is null ? NotFound() : NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpDelete("invoices/{id:int}")]
+    public async Task<IActionResult> DeleteInvoice(int id, CancellationToken ct)
+    {
+        try
+        {
+            return await _finance.DeleteInvoiceAsync(id, ct) ? NoContent() : NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpPost("invoices/{id:int}/send")]
+    public async Task<ActionResult<Invoice>> MarkSent(int id, CancellationToken ct)
+    {
+        try
+        {
+            var invoice = await _finance.MarkSentAsync(id, ct);
+            return invoice is null ? NotFound() : Ok(invoice);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpPost("invoices/{id:int}/void")]
+    public async Task<ActionResult<Invoice>> VoidInvoice(int id, CancellationToken ct)
+    {
+        try
+        {
+            var invoice = await _finance.VoidInvoiceAsync(id, ct);
+            return invoice is null ? NotFound() : Ok(invoice);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
     }
 
     [HttpPost("invoices/{id:int}/mark-paid")]
-    public async Task<IActionResult> MarkPaid(int id, CancellationToken ct)
+    public async Task<ActionResult<Invoice>> MarkPaid(int id, CancellationToken ct)
     {
-        var invoice = await _db.Invoices.FindAsync([id], ct);
-        if (invoice is null) return NotFound();
-        invoice.IsPaid = true;
-        await _db.SaveChangesAsync(ct);
-        return NoContent();
-    }
-
-    [HttpGet("vendors")]
-    public async Task<ActionResult<IEnumerable<Vendor>>> GetVendors([FromQuery] int companyMasterId, CancellationToken ct)
-        => Ok(await _db.Vendors.AsNoTracking()
-            .Where(v => v.CompanyMasterId == companyMasterId)
-            .OrderBy(v => v.Name)
-            .ToListAsync(ct));
-
-    [HttpPost("vendors")]
-    public async Task<ActionResult<Vendor>> CreateVendor([FromBody] Vendor vendor, CancellationToken ct)
-    {
-        vendor.Id = 0;
-        _db.Vendors.Add(vendor);
-        await _db.SaveChangesAsync(ct);
-        return Ok(vendor);
-    }
-
-    [HttpPost("bills")]
-    public async Task<ActionResult<Bill>> CreateBill([FromBody] Bill bill, CancellationToken ct)
-    {
-        bill.Id = 0;
-        if (string.IsNullOrWhiteSpace(bill.BillNumber))
+        try
         {
-            bill.BillNumber = $"BILL-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}";
+            var invoice = await _finance.MarkPaidAsync(id, ct);
+            return invoice is null ? NotFound() : Ok(invoice);
         }
-
-        _db.Bills.Add(bill);
-        await _db.SaveChangesAsync(ct);
-        return Ok(bill);
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
     }
+
+    [HttpGet("payments")]
+    public async Task<ActionResult<IEnumerable<InvoicePayment>>> GetPayments(CancellationToken ct)
+        => Ok(await _finance.ListPaymentsAsync(ct));
+
+    [HttpPost("invoices/{id:int}/payments")]
+    public async Task<ActionResult<InvoicePayment>> RecordPayment(
+        int id, [FromBody] InvoicePayment payment, CancellationToken ct)
+    {
+        var (ok, error, created) = await _finance.RecordPaymentAsync(id, payment, ct);
+        if (!ok) return BadRequest(new { error });
+        return Ok(created);
+    }
+
+    [HttpDelete("payments/{id:int}")]
+    public async Task<IActionResult> DeletePayment(int id, CancellationToken ct)
+        => await _finance.DeletePaymentAsync(id, ct) ? NoContent() : NotFound();
 }

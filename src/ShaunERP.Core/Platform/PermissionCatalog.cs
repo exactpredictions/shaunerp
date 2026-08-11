@@ -72,6 +72,28 @@ public static class Permissions
     public const string CrmNotesUpdate = "crm.notes.update";
     public const string CrmNotesDelete = "crm.notes.delete";
 
+    public const string FinanceAccess = "finance.access";
+    public const string FinanceDashboardView = "finance.dashboard.view";
+    public const string FinanceInvoicesView = "finance.invoices.view";
+    public const string FinanceInvoicesCreate = "finance.invoices.create";
+    public const string FinanceInvoicesUpdate = "finance.invoices.update";
+    public const string FinanceInvoicesDelete = "finance.invoices.delete";
+    public const string FinanceInvoicesMarkPaid = "finance.invoices.mark_paid";
+    public const string FinancePaymentsRecord = "finance.payments.record";
+    public const string FinanceSettingsManage = "finance.settings.manage";
+    public const string FinanceCustomersView = "finance.customers.view";
+
+    public const string OrdersAccess = "orders.access";
+    public const string OrdersDashboardView = "orders.dashboard.view";
+    public const string OrdersView = "orders.view";
+    public const string OrdersCreate = "orders.create";
+    public const string OrdersUpdate = "orders.update";
+    public const string OrdersDelete = "orders.delete";
+    public const string OrdersConfirm = "orders.confirm";
+    public const string OrdersFulfill = "orders.fulfill";
+    public const string OrdersCancel = "orders.cancel";
+    public const string OrdersCreateInvoice = "orders.create_invoice";
+
     public const string PlatformAccess = "platform.access";
     public const string PlatformTenantsManage = "platform.tenants.manage";
     public const string PlatformModulesManage = "platform.modules.manage";
@@ -94,13 +116,18 @@ public static class Permissions
         CrmMeetingsView, CrmMeetingsCreate, CrmMeetingsUpdate, CrmMeetingsDelete,
         CrmCallsView, CrmCallsCreate, CrmCallsUpdate, CrmCallsDelete,
         CrmNotesView, CrmNotesCreate, CrmNotesUpdate, CrmNotesDelete,
+        FinanceAccess, FinanceDashboardView,
+        FinanceInvoicesView, FinanceInvoicesCreate, FinanceInvoicesUpdate, FinanceInvoicesDelete,
+        FinanceInvoicesMarkPaid, FinancePaymentsRecord, FinanceSettingsManage, FinanceCustomersView,
+        OrdersAccess, OrdersDashboardView, OrdersView, OrdersCreate, OrdersUpdate, OrdersDelete,
+        OrdersConfirm, OrdersFulfill, OrdersCancel, OrdersCreateInvoice,
         PlatformAccess, PlatformTenantsManage, PlatformModulesManage
     ];
 
     /// <summary>Full system access — every permission granted.</summary>
     public static IReadOnlyList<string> AdminDefaults { get; } = All;
 
-    /// <summary>Full CRM operational access (all CRM permissions) plus user directory view.</summary>
+    /// <summary>Full CRM + invoicing operational access plus user directory view.</summary>
     public static IReadOnlyList<string> ManagerDefaults { get; } =
     [
         UsersAccess, UsersView, RolesView,
@@ -118,7 +145,12 @@ public static class Permissions
         CrmTasksView, CrmTasksCreate, CrmTasksUpdate, CrmTasksDelete,
         CrmMeetingsView, CrmMeetingsCreate, CrmMeetingsUpdate, CrmMeetingsDelete,
         CrmCallsView, CrmCallsCreate, CrmCallsUpdate, CrmCallsDelete,
-        CrmNotesView, CrmNotesCreate, CrmNotesUpdate, CrmNotesDelete
+        CrmNotesView, CrmNotesCreate, CrmNotesUpdate, CrmNotesDelete,
+        FinanceAccess, FinanceDashboardView,
+        FinanceInvoicesView, FinanceInvoicesCreate, FinanceInvoicesUpdate, FinanceInvoicesDelete,
+        FinanceInvoicesMarkPaid, FinancePaymentsRecord, FinanceSettingsManage, FinanceCustomersView,
+        OrdersAccess, OrdersDashboardView, OrdersView, OrdersCreate, OrdersUpdate, OrdersDelete,
+        OrdersConfirm, OrdersFulfill, OrdersCancel, OrdersCreateInvoice
     ];
 
     public static IReadOnlyList<string> UserDefaults { get; } =
@@ -134,6 +166,11 @@ public static class Permissions
         CrmTasksView, CrmTasksCreate, CrmTasksUpdate,
         CrmMeetingsView, CrmMeetingsCreate, CrmMeetingsUpdate,
         CrmCallsView, CrmCallsCreate, CrmCallsUpdate,
-        CrmNotesView, CrmNotesCreate, CrmNotesUpdate
+        CrmNotesView, CrmNotesCreate, CrmNotesUpdate,
+        FinanceAccess, FinanceDashboardView,
+        FinanceInvoicesView, FinanceInvoicesCreate, FinanceInvoicesUpdate,
+        FinanceInvoicesMarkPaid, FinancePaymentsRecord, FinanceCustomersView,
+        OrdersAccess, OrdersDashboardView, OrdersView, OrdersCreate, OrdersUpdate,
+        OrdersConfirm, OrdersCreateInvoice
     ];
 }

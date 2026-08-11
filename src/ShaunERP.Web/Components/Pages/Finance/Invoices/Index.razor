@@ -1,0 +1,80 @@
+@page "/finance/invoices"
+@attribute [Authorize]
+@using ShaunERP.Core.Finance
+@inject IFinanceService Finance
+
+<PageTitle>Invoices — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div><p class="eyebrow">Finance</p><h1>Invoices</h1></div>
+        <a class="btn" href="/finance/invoices/new">New invoice</a>
+    </header>
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (_error is not null) { <div class="error-state">@_error</div> }
+    else if (_items.Count == 0) { <p class="muted">No invoices yet. <a href="/finance/invoices/new">Create the first invoice</a>.</p> }
+    else
+    {
+        <div class="table-wrap"><table>
+            <thead>
+                <tr>
+                    <th>Number</th>
+                    <th>Customer</th>
+                    <th>Issue</th>
+                    <th>Due</th>
+                    <th>Status</th>
+                    <th>Total</th>
+                    <th>Balance</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var x in _items)
+            {
+                <tr>
+                    <td>@x.InvoiceNumber</td>
+                    <td>@(x.CustomerName ?? x.Customer?.CompanyName ?? "—")</td>
+                    <td>@x.InvoiceDate.ToString("yyyy-MM-dd")</td>
+                    <td>@(x.DueDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                    <td><span class="pill @(StatusClass(x))">@x.DisplayStatus</span></td>
+                    <td>@((x.GrandTotal > 0 ? x.GrandTotal : x.Amount).ToString("N2")) @x.CurrencyCode</td>
+                    <td>@x.BalanceDue.ToString("N2")</td>
+                    <td><a href="@($"/finance/invoices/{x.Id}")">Open</a></td>
+                </tr>
+            }
+            </tbody>
+        </table></div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private List<Invoice> _items = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _items = (await Finance.ListInvoicesAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string StatusClass(Invoice x) => x.DisplayStatus switch
+    {
+        "Paid" => "ok",
+        "Overdue" => "off",
+        "Void" => "off",
+        "Partially paid" => "ok",
+        "Sent" => "ok",
+        _ => ""
+    };
+}

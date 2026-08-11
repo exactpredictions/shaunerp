@@ -6,6 +6,7 @@ public static class ModuleKeys
     public const string Users = "users";
     public const string Crm = "crm";
     public const string Finance = "finance";
+    public const string Orders = "orders";
     public const string Hrms = "hrms";
     public const string Projects = "projects";
     public const string Platform = "platform";
@@ -17,13 +18,14 @@ public static class ModuleKeys
             return string.Empty;
         }
 
-        var value = keyOrName.Trim().ToLowerInvariant();
+        var value = keyOrName.Trim().ToLowerInvariant().Replace(' ', '-').Replace('_', '-');
         return value switch
         {
-            "user" or "usermanagement" or "user-management" or "user_management" => Users,
-            "crm" or "customer relationship" => Crm,
+            "user" or "usermanagement" or "user-management" => Users,
+            "crm" or "customer-relationship" or "customer relationship" => Crm,
             "finance" or "invoicing" or "accounting" => Finance,
-            "hrms" or "hr" or "human resources" => Hrms,
+            "orders" or "sales" or "salesorders" or "sales-orders" or "order" => Orders,
+            "hrms" or "hr" or "human-resources" or "human resources" => Hrms,
             "projects" or "project" => Projects,
             "platform" or "admin" or "platform-admin" => Platform,
             "home" or "dashboard" or "main" => Home,

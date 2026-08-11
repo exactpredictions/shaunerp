@@ -49,6 +49,39 @@ public class ModuleRegistryTests
     }
 
     [Fact]
+    public void GetAccessible_IncludesFinanceWhenEntitled()
+    {
+        var tenant = new TenantContext();
+        tenant.Set(new TenantContextSnapshot
+        {
+            UserId = 1,
+            CompanyId = 1,
+            CompanyName = "Demo",
+            Entitlements = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ModuleKeys.Crm, ModuleKeys.Finance },
+            Permissions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                Permissions.CrmAccess,
+                Permissions.CrmDashboardView,
+                Permissions.FinanceAccess,
+                Permissions.FinanceDashboardView,
+                Permissions.FinanceInvoicesView
+            }
+        });
+
+        var modules = _registry.GetAccessible(tenant);
+        Assert.Contains(modules, m => m.Key == ModuleKeys.Finance);
+        var finance = _registry.GetByKey(ModuleKeys.Finance)!;
+        Assert.False(finance.IsPlaceholder);
+        Assert.True(finance.IsEnabled);
+        Assert.Contains(ModuleKeys.Crm, finance.Dependencies);
+
+        var nav = _registry.GetNavigation(ModuleKeys.Finance, tenant);
+        Assert.Contains(nav, n => n.Route == "/finance");
+        Assert.Contains(nav, n => n.Route == "/finance/invoices");
+        Assert.DoesNotContain(nav, n => n.Route == "/finance/settings");
+    }
+
+    [Fact]
     public void GetAccessible_HidesUnauthorizedModules()
     {
         var tenant = new TenantContext();
@@ -135,8 +168,20 @@ public class ModuleRegistryTests
     [InlineData("CRM", "crm")]
     [InlineData("Users", "users")]
     [InlineData("user-management", "users")]
+    [InlineData("sales-orders", "orders")]
+    [InlineData("Sales Orders", "orders")]
     public void ModuleKeys_Normalize(string input, string expected)
     {
         Assert.Equal(expected, ModuleKeys.Normalize(input));
+    }
+
+    [Fact]
+    public void OrdersModule_IsEnabledInCatalog()
+    {
+        var module = _registry.GetByKey(ModuleKeys.Orders);
+        Assert.NotNull(module);
+        Assert.False(module!.IsPlaceholder);
+        Assert.True(module.IsEnabled);
+        Assert.Contains(module.NavigationItems, n => n.Route == "/orders/list");
     }
 }

@@ -1,0 +1,794 @@
+@page "/finance/invoices/new"
+@page "/finance/invoices/{Id:int}"
+@attribute [Authorize]
+@using System.Globalization
+@using ShaunERP.Core.Finance
+@inject IFinanceService Finance
+@inject NavigationManager Nav
+
+<PageTitle>@(_isNew ? "New invoice" : "Edit invoice") — ShaunERP</PageTitle>
+
+<section class="page invoice-edit">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">Finance · Invoices</p>
+            <h1>@(_isNew ? "New invoice" : (_model.InvoiceNumber is { Length: > 0 } ? _model.InvoiceNumber : $"Invoice #{Id}"))</h1>
+            @if (!_isNew)
+            {
+                <p class="muted">
+                    Status: <span class="pill @StatusPillClass(_model)">@_model.DisplayStatus</span>
+                    · @(_model.CurrencyCode ?? "USD") @_model.GrandTotal.ToString("N2")
+                    · Balance @_model.BalanceDue.ToString("N2")
+                    @if (_dirty)
+                    {
+                        <span class="invoice-dirty"> · Unsaved changes</span>
+                    }
+                </p>
+            }
+            else if (_dirty)
+            {
+                <p class="muted"><span class="invoice-dirty">Unsaved changes</span></p>
+            }
+        </div>
+        <div class="page-head-actions">
+            <a class="btn ghost" href="/finance/invoices">Back</a>
+        </div>
+    </header>
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (!_isNew && _missing) { <p class="alert">Not found.</p> }
+    else
+    {
+        <EditForm Model="_model" OnValidSubmit="SaveDraftAsync" class="invoice-form">
+            @if (!string.IsNullOrEmpty(_error)) { <div class="alert">@_error</div> }
+            @if (!string.IsNullOrEmpty(_ok)) { <div class="ok-msg">@_ok</div> }
+
+            @* —— 1. Header —— *@
+            <section class="invoice-panel">
+                <header class="invoice-panel-head">
+                    <h2>Header</h2>
+                    <p class="muted">General invoice details</p>
+                </header>
+
+                <div class="invoice-header-grid">
+                    <label>Invoice number
+                        <InputText @bind-Value="_model.InvoiceNumber"
+                                   @bind-Value:after="MarkDirty"
+                                   placeholder="Auto on save"
+                                   disabled="@(_isLocked || !_isDraft)" />
+                        @if (_isNew || _isDraft)
+                        {
+                            <span class="field-hint">Assigned from billing book sequence when blank</span>
+                        }
+                    </label>
+                    <label>Status
+                        <input class="readonly-field" value="@_model.DisplayStatus" readonly tabindex="-1" />
+                    </label>
+                    <label>Customer
+                        <InputSelect @bind-Value="_customerIdStr" @bind-Value:after="OnCustomerChangedAsync" disabled="@_isLocked">
+                            <option value="">— Select CRM customer —</option>
+                            @foreach (var c in _customers)
+                            {
+                                <option value="@c.Id">@(c.CompanyName ?? $"Customer #{c.Id}")</option>
+                            }
+                        </InputSelect>
+                    </label>
+                    <label>Salesperson
+                        <InputText @bind-Value="_model.Salesperson" @bind-Value:after="MarkDirty" disabled="@_isLocked" />
+                    </label>
+                    <label>Issue date
+                        <InputDate @bind-Value="_issueDate" @bind-Value:after="OnDatesChanged" disabled="@_isLocked" />
+                    </label>
+                    <label>Due date
+                        <InputDate @bind-Value="_dueDate" @bind-Value:after="OnDatesChanged" disabled="@_isLocked" />
+                    </label>
+                    <label>Payment terms
+                        <InputText @bind-Value="_model.PaymentTerms" @bind-Value:after="MarkDirty" disabled="@_isLocked" />
+                    </label>
+                    <label>Currency
+                        <InputText @bind-Value="_model.CurrencyCode" @bind-Value:after="MarkDirty" disabled="@_isLocked" />
+                    </label>
+                    <label>PO / reference
+                        <InputText @bind-Value="_model.PurchaseOrderNumber" @bind-Value:after="MarkDirty" disabled="@_isLocked" />
+                    </label>
+                    <label>Billing book
+                        <input class="readonly-field" value="@(_bookName ?? "—")" readonly tabindex="-1" />
+                    </label>
+                </div>
+
+                <label class="invoice-span">Bill-to address
+                    <InputTextArea @bind-Value="_model.BillToAddress" @bind-Value:after="MarkDirty"
+                                   rows="3" disabled="@_isLocked"
+                                   placeholder="Filled from CRM customer when selected" />
+                </label>
+            </section>
+
+            @* —— 2. Body: line items —— *@
+            <section class="invoice-panel">
+                <header class="invoice-panel-head">
+                    <h2>Line items</h2>
+                    <p class="muted">Add products or custom lines · totals recalculate as you type</p>
+                </header>
+
+                <div class="invoice-lines-wrap">
+                    <table class="invoice-lines">
+                        <thead>
+                            <tr>
+                                <th class="col-num">#</th>
+                                <th class="col-product">Product</th>
+                                <th class="col-desc">Description</th>
+                                <th class="col-qty">Qty</th>
+                                <th class="col-price">Unit price</th>
+                                <th class="col-disc">Disc %</th>
+                                <th class="col-tax">Tax %</th>
+                                <th class="col-amt">Amount</th>
+                                <th class="col-actions"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @if (_lines.Count == 0)
+                        {
+                            <tr class="invoice-empty-row">
+                                <td colspan="9">
+                                    <span class="muted">No lines yet.</span>
+                                    @if (!_isLocked)
+                                    {
+                                        <button class="btn ghost" type="button" @onclick="AddLine">Add line</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                        else
+                        {
+                            @for (var i = 0; i < _lines.Count; i++)
+                            {
+                                var idx = i;
+                                <tr>
+                                    <td class="col-num">@(idx + 1)</td>
+                                    <td class="col-product">
+                                        <select value="@(_lines[idx].ProductId?.ToString() ?? "")"
+                                                disabled="@_isLocked"
+                                                @onchange="e => OnProductChanged(idx, e.Value?.ToString())">
+                                            <option value="">Custom</option>
+                                            @foreach (var p in _products)
+                                            {
+                                                <option value="@p.Id">@p.Name</option>
+                                            }
+                                        </select>
+                                    </td>
+                                    <td class="col-desc">
+                                        <input value="@LineDescription(_lines[idx])"
+                                               disabled="@_isLocked"
+                                               @onchange="e => OnDescriptionChanged(idx, e.Value?.ToString())"
+                                               placeholder="Description" />
+                                    </td>
+                                    <td class="col-qty">
+                                        <input type="number" step="any" min="0"
+                                               value="@Fmt(_lines[idx].Quantity)"
+                                               disabled="@_isLocked"
+                                               @onchange="e => OnLineDecimal(idx, nameof(InvoiceLine.Quantity), e.Value?.ToString())" />
+                                    </td>
+                                    <td class="col-price">
+                                        <input type="number" step="any" min="0"
+                                               value="@Fmt(_lines[idx].UnitPrice)"
+                                               disabled="@_isLocked"
+                                               @onchange="e => OnLineDecimal(idx, nameof(InvoiceLine.UnitPrice), e.Value?.ToString())" />
+                                    </td>
+                                    <td class="col-disc">
+                                        <input type="number" step="any" min="0" max="100"
+                                               value="@Fmt(_lines[idx].Discount)"
+                                               disabled="@_isLocked"
+                                               @onchange="e => OnLineDecimal(idx, nameof(InvoiceLine.Discount), e.Value?.ToString())" />
+                                    </td>
+                                    <td class="col-tax">
+                                        <input type="number" step="any" min="0" max="100"
+                                               value="@Fmt(_lines[idx].TaxRate)"
+                                               disabled="@_isLocked"
+                                               @onchange="e => OnLineDecimal(idx, nameof(InvoiceLine.TaxRate), e.Value?.ToString())" />
+                                    </td>
+                                    <td class="col-amt mono">@ComputeLineTotal(_lines[idx]).ToString("N2")</td>
+                                    <td class="col-actions">
+                                        @if (!_isLocked)
+                                        {
+                                            <button class="btn-icon danger" type="button" title="Remove line"
+                                                    @onclick="() => RemoveLine(idx)" disabled="@(_lines.Count <= 1)">×</button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        }
+                        </tbody>
+                    </table>
+                </div>
+
+                @if (!_isLocked)
+                {
+                    <div class="invoice-lines-footer">
+                        <button class="btn ghost" type="button" @onclick="AddLine">+ Add line</button>
+                    </div>
+                }
+            </section>
+
+            @* —— 3. Footer: totals + notes + actions —— *@
+            <section class="invoice-panel invoice-footer-panel">
+                <header class="invoice-panel-head">
+                    <h2>Totals &amp; notes</h2>
+                    <p class="muted">Document summary and closing remarks</p>
+                </header>
+
+                <div class="invoice-footer-grid">
+                    <div class="invoice-notes">
+                        <label>Notes
+                            <InputTextArea @bind-Value="_model.Notes" @bind-Value:after="MarkDirty"
+                                           rows="3" disabled="@_isLocked" placeholder="Internal or customer-facing notes" />
+                        </label>
+                        <label>Terms / footer text
+                            <InputTextArea @bind-Value="_model.Terms" @bind-Value:after="MarkDirty"
+                                           rows="3" disabled="@_isLocked" placeholder="Payment terms, late fees, thank-you text…" />
+                        </label>
+                    </div>
+
+                    <div class="invoice-totals" @key="_totalsVersion">
+                        <div class="tot-row">
+                            <span>Subtotal</span>
+                            <strong class="mono">@_liveSubtotal.ToString("N2")</strong>
+                        </div>
+                        <div class="tot-row tot-edit">
+                            <label>Document discount
+                                <InputNumber @bind-Value="_model.Discount" @bind-Value:after="OnDocumentDiscountChanged"
+                                             disabled="@_isLocked" />
+                            </label>
+                        </div>
+                        <div class="tot-row">
+                            <span>Tax</span>
+                            <strong class="mono">@_liveTax.ToString("N2")</strong>
+                        </div>
+                        <div class="tot-row tot-grand">
+                            <span>Grand total</span>
+                            <strong class="mono">@_liveGrand.ToString("N2") @_model.CurrencyCode</strong>
+                        </div>
+                        @if (!_isNew)
+                        {
+                            <div class="tot-row">
+                                <span>Amount paid</span>
+                                <strong class="mono">@_model.AmountPaid.ToString("N2")</strong>
+                            </div>
+                            <div class="tot-row tot-balance">
+                                <span>Balance due</span>
+                                <strong class="mono">@Math.Max(0, _liveGrand - _model.AmountPaid).ToString("N2")</strong>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <div class="form-actions invoice-actions">
+                    @if (!_isLocked)
+                    {
+                        <button class="btn" type="submit" disabled="@_saving">
+                            @(_saving ? "Saving…" : (_isNew || _isDraft ? "Save draft" : "Save"))
+                        </button>
+                    }
+
+                    @if (!_isNew && _isDraft && !_isLocked)
+                    {
+                        <button class="btn ghost" type="button" disabled="@_saving" @onclick="SendAsync">Mark sent</button>
+                    }
+
+                    @if (!_isNew && _model.InvoiceStatus is InvoiceStatus.Sent or InvoiceStatus.PartiallyPaid or InvoiceStatus.Draft)
+                    {
+                        <button class="btn ghost" type="button" disabled="@_saving" @onclick="MarkPaidAsync">Mark paid</button>
+                    }
+
+                    @if (!_isNew && _model.InvoiceStatus is not InvoiceStatus.Void and not InvoiceStatus.Paid)
+                    {
+                        <button class="btn ghost danger" type="button" disabled="@_saving" @onclick="VoidAsync">Void</button>
+                    }
+
+                    @if (!_isNew && _isDraft && _model.AmountPaid <= 0)
+                    {
+                        <button class="btn ghost danger" type="button" disabled="@_saving" @onclick="DeleteAsync">Delete</button>
+                    }
+                </div>
+            </section>
+        </EditForm>
+
+        @if (!_isNew && _model.BalanceDue > 0 && _model.InvoiceStatus != InvoiceStatus.Void)
+        {
+            <section class="invoice-panel invoice-payment-panel">
+                <header class="invoice-panel-head">
+                    <h2>Record payment</h2>
+                    <p class="muted">Apply a payment against the outstanding balance</p>
+                </header>
+                @if (!string.IsNullOrEmpty(_payError)) { <div class="alert">@_payError</div> }
+                @if (!string.IsNullOrEmpty(_payOk)) { <div class="ok-msg">@_payOk</div> }
+                <div class="invoice-header-grid">
+                    <label>Amount <InputNumber @bind-Value="_payment.Amount" /></label>
+                    <label>Date <InputDate @bind-Value="_payDate" /></label>
+                    <label>Method
+                        <InputSelect @bind-Value="_payment.Method">
+                            <option>Bank transfer</option>
+                            <option>Cash</option>
+                            <option>Card</option>
+                            <option>Cheque</option>
+                            <option>Other</option>
+                        </InputSelect>
+                    </label>
+                    <label>Reference <InputText @bind-Value="_payment.Reference" /></label>
+                </div>
+                <div class="form-actions">
+                    <button class="btn" type="button" @onclick="RecordPaymentAsync">Record payment</button>
+                </div>
+
+                @if (_model.Payments?.Count > 0)
+                {
+                    <h3 class="form-section">Payments</h3>
+                    <div class="table-wrap"><table>
+                        <thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th></tr></thead>
+                        <tbody>
+                        @foreach (var p in _model.Payments.OrderByDescending(p => p.PaymentDate))
+                        {
+                            <tr>
+                                <td>@p.PaymentDate.ToString("yyyy-MM-dd")</td>
+                                <td class="mono">@p.Amount.ToString("N2")</td>
+                                <td>@(p.Method ?? "—")</td>
+                                <td>@(p.Reference ?? "—")</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table></div>
+                }
+            </section>
+        }
+    }
+</section>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool _isNew, _loading = true, _missing, _dirty, _saving;
+    private Invoice _model = new() { InvoiceStatus = InvoiceStatus.Draft, CurrencyCode = "USD" };
+    private List<InvoiceLine> _lines = [new() { Quantity = 1 }];
+    private List<Customer> _customers = new();
+    private List<CrmProduct> _products = new();
+    private string _customerIdStr = "";
+    private DateTime? _issueDate = DateTime.UtcNow.Date;
+    private DateTime? _dueDate = DateTime.UtcNow.Date.AddDays(30);
+    private string? _error, _ok, _payError, _payOk, _bookName, _cleanFingerprint;
+    private InvoicePayment _payment = new() { Method = "Bank transfer" };
+    private DateTime? _payDate = DateTime.UtcNow.Date;
+    private decimal _liveSubtotal, _liveTax, _liveGrand;
+    private int _totalsVersion;
+
+    private bool _isDraft => _model.InvoiceStatus == InvoiceStatus.Draft;
+    private bool _isLocked => _model.InvoiceStatus is InvoiceStatus.Paid or InvoiceStatus.Void;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true; _error = null; _ok = null; _payError = null; _payOk = null; _missing = false; _dirty = false;
+        _isNew = Nav.ToBaseRelativePath(Nav.Uri).Contains("invoices/new", StringComparison.OrdinalIgnoreCase);
+
+        try
+        {
+            _customers = (await Finance.ListCrmCustomersAsync()).ToList();
+            _products = (await Finance.ListProductsAsync()).ToList();
+            var book = await Finance.GetOrCreateBillingBookAsync();
+            _bookName = string.IsNullOrWhiteSpace(book.LegalName) ? book.Name : book.LegalName;
+
+            if (_isNew)
+            {
+                _model = new Invoice
+                {
+                    InvoiceStatus = InvoiceStatus.Draft,
+                    CurrencyCode = book.Currency,
+                    PaymentTerms = book.DefaultPaymentTerms,
+                    InvoiceDate = DateTime.UtcNow.Date,
+                    DueDate = DateTime.UtcNow.Date.AddDays(book.DefaultDueDays > 0 ? book.DefaultDueDays : 30),
+                    Terms = book.DefaultPaymentTerms
+                };
+                _lines = [new InvoiceLine { Quantity = 1 }];
+                _customerIdStr = "";
+                _issueDate = _model.InvoiceDate.Date;
+                _dueDate = _model.DueDate?.Date;
+                RecalcLiveTotals();
+                CaptureClean();
+                _loading = false;
+                return;
+            }
+
+            var row = await Finance.GetInvoiceAsync(Id);
+            if (row is null) { _missing = true; _loading = false; return; }
+            ApplyLoaded(row);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void ApplyLoaded(Invoice row)
+    {
+        _model = row;
+        _lines = row.Lines?.OrderBy(l => l.SortOrder).Select(CloneLine).ToList()
+            ?? [new InvoiceLine { Quantity = 1 }];
+        if (_lines.Count == 0) _lines.Add(new InvoiceLine { Quantity = 1 });
+        _customerIdStr = row.CustomerId?.ToString() ?? "";
+        _issueDate = row.InvoiceDate.Date;
+        _dueDate = row.DueDate?.Date;
+        _payment = new InvoicePayment { Method = "Bank transfer", Amount = row.BalanceDue };
+        _payDate = DateTime.UtcNow.Date;
+        RecalcLiveTotals();
+        CaptureClean();
+        _dirty = false;
+    }
+
+    private static InvoiceLine CloneLine(InvoiceLine l) => new()
+    {
+        Id = l.Id,
+        ProductId = l.ProductId,
+        ProductName = l.ProductName,
+        Description = l.Description,
+        Quantity = l.Quantity,
+        UnitPrice = l.UnitPrice,
+        Discount = l.Discount,
+        TaxRate = l.TaxRate,
+        TaxAmount = l.TaxAmount,
+        LineTotal = l.LineTotal,
+        SortOrder = l.SortOrder
+    };
+
+    private void MarkDirty()
+    {
+        _dirty = Fingerprint() != _cleanFingerprint;
+        _ok = null;
+    }
+
+    private void CaptureClean()
+    {
+        RecalcLiveTotals();
+        _cleanFingerprint = Fingerprint();
+        _dirty = false;
+    }
+
+    private string Fingerprint()
+    {
+        var lines = string.Join("|", _lines.Select(l =>
+            $"{l.ProductId}:{l.ProductName}:{l.Description}:{l.Quantity}:{l.UnitPrice}:{l.Discount}:{l.TaxRate}"));
+        return string.Join("·",
+            _customerIdStr,
+            _model.InvoiceNumber,
+            _issueDate?.ToString("O"),
+            _dueDate?.ToString("O"),
+            _model.CurrencyCode,
+            _model.PaymentTerms,
+            _model.PurchaseOrderNumber,
+            _model.BillToAddress,
+            _model.Salesperson,
+            _model.Notes,
+            _model.Terms,
+            _model.Discount.ToString(CultureInfo.InvariantCulture),
+            lines);
+    }
+
+    private void AddLine()
+    {
+        if (_isLocked) return;
+        _lines.Add(new InvoiceLine { Quantity = 1, SortOrder = _lines.Count });
+        RecalcLiveTotals();
+        MarkDirty();
+    }
+
+    private void RemoveLine(int idx)
+    {
+        if (_isLocked || _lines.Count <= 1) return;
+        _lines.RemoveAt(idx);
+        RecalcLiveTotals();
+        MarkDirty();
+    }
+
+    private async Task OnCustomerChangedAsync()
+    {
+        MarkDirty();
+        if (!int.TryParse(_customerIdStr, out var cid) || cid <= 0)
+        {
+            _model.CustomerId = null;
+            return;
+        }
+
+        var customer = _customers.FirstOrDefault(c => c.Id == cid);
+        if (customer is null) return;
+
+        _model.CustomerId = customer.Id;
+        _model.CustomerName = customer.CompanyName;
+        if (!string.IsNullOrWhiteSpace(customer.BillingAddress))
+            _model.BillToAddress = customer.BillingAddress;
+        if (!string.IsNullOrWhiteSpace(customer.PaymentTerms))
+            _model.PaymentTerms = customer.PaymentTerms;
+        if (!string.IsNullOrWhiteSpace(customer.CustomerOwner))
+            _model.Salesperson = customer.CustomerOwner;
+        await Task.CompletedTask;
+    }
+
+    private void OnDatesChanged()
+    {
+        MarkDirty();
+    }
+
+    private void OnProductChanged(int idx, string? value)
+    {
+        if (_isLocked) return;
+        if (!int.TryParse(value, out var productId) || productId <= 0)
+        {
+            _lines[idx].ProductId = null;
+            MarkDirty();
+            return;
+        }
+
+        var product = _products.FirstOrDefault(p => p.Id == productId);
+        if (product is null) return;
+        _lines[idx].ProductId = product.Id;
+        _lines[idx].ProductName = product.Name;
+        _lines[idx].UnitPrice = product.UnitPrice;
+        _lines[idx].TaxRate = product.TaxRate ?? 0;
+        if (string.IsNullOrWhiteSpace(_lines[idx].Description))
+            _lines[idx].Description = product.Description;
+        RecalcLiveTotals();
+        MarkDirty();
+    }
+
+    private void OnDescriptionChanged(int idx, string? value)
+    {
+        if (_isLocked) return;
+        var text = value?.Trim() ?? "";
+        _lines[idx].Description = text;
+        if (string.IsNullOrWhiteSpace(_lines[idx].ProductName) || _lines[idx].ProductId is null)
+            _lines[idx].ProductName = text;
+        MarkDirty();
+    }
+
+    private void OnLineDecimal(int idx, string field, string? raw)
+    {
+        if (_isLocked) return;
+        if (!decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var val)
+            && !decimal.TryParse(raw, NumberStyles.Number, CultureInfo.CurrentCulture, out val))
+            val = 0;
+
+        switch (field)
+        {
+            case nameof(InvoiceLine.Quantity): _lines[idx].Quantity = val; break;
+            case nameof(InvoiceLine.UnitPrice): _lines[idx].UnitPrice = val; break;
+            case nameof(InvoiceLine.Discount): _lines[idx].Discount = Math.Clamp(val, 0, 100); break;
+            case nameof(InvoiceLine.TaxRate): _lines[idx].TaxRate = Math.Clamp(val, 0, 100); break;
+        }
+
+        RecalcLiveTotals();
+        MarkDirty();
+    }
+
+    private void RecalcLiveTotals()
+    {
+        if (_model.Discount < 0) _model.Discount = 0;
+        _liveSubtotal = Math.Round(_lines.Sum(l => InvoiceLine.LineNetAmount(l.Quantity, l.UnitPrice, l.Discount)), 2);
+        _liveTax = Math.Round(_lines.Sum(l =>
+        {
+            var net = InvoiceLine.LineNetAmount(l.Quantity, l.UnitPrice, l.Discount);
+            return Math.Round(net * (Math.Clamp(l.TaxRate, 0, 100) / 100m), 2);
+        }), 2);
+        var afterDisc = Math.Max(0, _liveSubtotal - Math.Max(0, _model.Discount));
+        _liveGrand = Math.Round(afterDisc + _liveTax, 2);
+        _totalsVersion++;
+    }
+
+    private void OnDocumentDiscountChanged()
+    {
+        RecalcLiveTotals();
+        MarkDirty();
+    }
+
+    private static decimal ComputeLineTotal(InvoiceLine line)
+    {
+        var net = InvoiceLine.LineNetAmount(line.Quantity, line.UnitPrice, line.Discount);
+        var tax = Math.Round(net * (Math.Clamp(line.TaxRate, 0, 100) / 100m), 2);
+        return Math.Round(net + tax, 2);
+    }
+
+    private static string LineDescription(InvoiceLine line)
+        => !string.IsNullOrWhiteSpace(line.Description) ? line.Description!
+            : line.ProductName;
+
+    private static string Fmt(decimal value)
+        => value.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private string? ValidateClient()
+    {
+        if (string.IsNullOrWhiteSpace(_customerIdStr))
+            return "Customer is required.";
+        if (_lines.All(l => string.IsNullOrWhiteSpace(l.ProductName)
+            && string.IsNullOrWhiteSpace(l.Description)
+            && l.UnitPrice == 0))
+            return "Add at least one invoice line.";
+        if (_lines.Any(l => l.Quantity <= 0
+            && (!string.IsNullOrWhiteSpace(l.ProductName) || !string.IsNullOrWhiteSpace(l.Description) || l.UnitPrice != 0)))
+            return "Line quantity must be greater than zero.";
+        if (_issueDate.HasValue && _dueDate.HasValue && _dueDate.Value.Date < _issueDate.Value.Date)
+            return "Due date cannot be earlier than the issue date.";
+        return null;
+    }
+
+    private void ApplyFormToModel()
+    {
+        _model.CustomerId = int.TryParse(_customerIdStr, out var cid) && cid > 0 ? cid : null;
+        _model.InvoiceDate = _issueDate.HasValue
+            ? DateTime.SpecifyKind(_issueDate.Value, DateTimeKind.Utc)
+            : DateTime.UtcNow;
+        _model.DueDate = _dueDate.HasValue
+            ? DateTime.SpecifyKind(_dueDate.Value, DateTimeKind.Utc)
+            : null;
+
+        for (var i = 0; i < _lines.Count; i++)
+        {
+            var line = _lines[i];
+            line.SortOrder = i;
+            if (string.IsNullOrWhiteSpace(line.ProductName) && !string.IsNullOrWhiteSpace(line.Description))
+                line.ProductName = line.Description!;
+            if (string.IsNullOrWhiteSpace(line.Description) && !string.IsNullOrWhiteSpace(line.ProductName))
+                line.Description = line.ProductName;
+        }
+
+        _model.Lines = _lines
+            .Where(l => !string.IsNullOrWhiteSpace(l.ProductName)
+                || !string.IsNullOrWhiteSpace(l.Description)
+                || l.UnitPrice != 0)
+            .ToList();
+        if (_model.Lines.Count == 0)
+            _model.Lines = _lines.ToList();
+    }
+
+    private async Task SaveDraftAsync()
+    {
+        if (_isLocked) return;
+        _error = null; _ok = null;
+        var validation = ValidateClient();
+        if (validation is not null) { _error = validation; return; }
+
+        _saving = true;
+        try
+        {
+            ApplyFormToModel();
+            if (_isNew || _isDraft)
+                _model.InvoiceStatus = InvoiceStatus.Draft;
+
+            if (_isNew)
+            {
+                var created = await Finance.CreateInvoiceAsync(_model);
+                Nav.NavigateTo($"/finance/invoices/{created.Id}");
+                return;
+            }
+
+            var updated = await Finance.UpdateInvoiceAsync(Id, _model);
+            if (updated is null) { _error = "Not found."; return; }
+            ApplyLoaded(updated);
+            _ok = "Saved.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task SendAsync()
+    {
+        if (_isLocked) return;
+        _error = null; _ok = null;
+        var validation = ValidateClient();
+        if (validation is not null) { _error = validation; return; }
+
+        _saving = true;
+        try
+        {
+            // Persist edits first so Mark sent uses current lines
+            ApplyFormToModel();
+            _model.InvoiceStatus = InvoiceStatus.Draft;
+            var updated = await Finance.UpdateInvoiceAsync(Id, _model);
+            if (updated is null) { _error = "Not found."; return; }
+
+            var row = await Finance.MarkSentAsync(Id);
+            if (row is null) { _error = "Not found."; return; }
+            await ReloadAsync();
+            _ok = "Marked as sent.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task MarkPaidAsync()
+    {
+        _error = null; _ok = null;
+        _saving = true;
+        try
+        {
+            if (_dirty && !_isLocked)
+            {
+                ApplyFormToModel();
+                var saved = await Finance.UpdateInvoiceAsync(Id, _model);
+                if (saved is null) { _error = "Not found."; return; }
+            }
+
+            var row = await Finance.MarkPaidAsync(Id);
+            if (row is null) { _error = "Not found."; return; }
+            await ReloadAsync();
+            _ok = "Marked as paid.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task VoidAsync()
+    {
+        _error = null; _ok = null;
+        _saving = true;
+        try
+        {
+            var row = await Finance.VoidInvoiceAsync(Id);
+            if (row is null) { _error = "Not found."; return; }
+            await ReloadAsync();
+            _ok = "Invoice voided.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task DeleteAsync()
+    {
+        _error = null;
+        _saving = true;
+        try
+        {
+            if (await Finance.DeleteInvoiceAsync(Id))
+                Nav.NavigateTo("/finance/invoices");
+            else
+                _error = "Delete failed.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task RecordPaymentAsync()
+    {
+        _payError = null; _payOk = null;
+        try
+        {
+            _payment.PaymentDate = _payDate.HasValue
+                ? DateTime.SpecifyKind(_payDate.Value, DateTimeKind.Utc)
+                : DateTime.UtcNow;
+            var (ok, error, _) = await Finance.RecordPaymentAsync(Id, _payment);
+            if (!ok) { _payError = error; return; }
+            await ReloadAsync();
+            _payOk = "Payment recorded.";
+            _payment = new InvoicePayment { Method = "Bank transfer", Amount = _model.BalanceDue };
+        }
+        catch (Exception ex) { _payError = ex.Message; }
+    }
+
+    private async Task ReloadAsync()
+    {
+        var row = await Finance.GetInvoiceAsync(Id);
+        if (row is null) return;
+        ApplyLoaded(row);
+    }
+
+    private static string StatusPillClass(Invoice x) => x.DisplayStatus switch
+    {
+        "Paid" => "ok",
+        "Overdue" or "Void" => "off",
+        "Partially paid" or "Sent" => "ok",
+        _ => ""
+    };
+}

@@ -1,0 +1,92 @@
+@page "/finance/settings"
+@attribute [Authorize]
+@using ShaunERP.Core.Finance
+@inject IFinanceService Finance
+
+<PageTitle>Billing settings — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div><p class="eyebrow">Finance · Setup</p><h1>Billing book</h1></div>
+        <a class="btn ghost" href="/finance">Dashboard</a>
+    </header>
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (_error is not null && _model is null) { <div class="error-state">@_error</div> }
+    else if (_model is not null)
+    {
+        <EditForm Model="_model" OnValidSubmit="SaveAsync" class="form-card form-wide">
+            @if (!string.IsNullOrEmpty(_error)) { <div class="alert">@_error</div> }
+            @if (!string.IsNullOrEmpty(_ok)) { <div class="ok-msg">@_ok</div> }
+
+            <h2 class="form-section">Legal entity</h2>
+            <div class="form-grid">
+                <label>Display name <InputText @bind-Value="_model.Name" required /></label>
+                <label>Legal name <InputText @bind-Value="_model.LegalName" /></label>
+                <label>Tax ID <InputText @bind-Value="_model.TaxId" /></label>
+                <label>Email <InputText @bind-Value="_model.Email" /></label>
+                <label>Phone <InputText @bind-Value="_model.ContactNumber" /></label>
+                <label>Currency <InputText @bind-Value="_model.Currency" /></label>
+            </div>
+
+            <h2 class="form-section">Address</h2>
+            <div class="form-grid">
+                <label>Street <InputText @bind-Value="_model.BillingStreet" /></label>
+                <label>City <InputText @bind-Value="_model.BillingCity" /></label>
+                <label>State <InputText @bind-Value="_model.BillingState" /></label>
+                <label>Postal code <InputText @bind-Value="_model.BillingZip" /></label>
+                <label>Country <InputText @bind-Value="_model.BillingCountry" /></label>
+                <label>Address (legacy) <InputText @bind-Value="_model.Address" /></label>
+            </div>
+
+            <h2 class="form-section">Invoice numbering</h2>
+            <div class="form-grid">
+                <label>Number prefix <InputText @bind-Value="_model.InvoiceNumberPrefix" /></label>
+                <label>Next sequence <InputNumber @bind-Value="_model.NextInvoiceSequence" /></label>
+                <label>Default payment terms <InputText @bind-Value="_model.DefaultPaymentTerms" /></label>
+                <label>Default due days <InputNumber @bind-Value="_model.DefaultDueDays" /></label>
+            </div>
+
+            <div class="form-actions">
+                <button class="btn" type="submit">Save settings</button>
+            </div>
+        </EditForm>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private CompanyMaster? _model;
+    private string? _error, _ok;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _model = await Finance.GetOrCreateBillingBookAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_model is null) return;
+        _error = null; _ok = null;
+        try
+        {
+            _model = await Finance.UpdateBillingBookAsync(_model);
+            _ok = "Billing settings saved.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+}
