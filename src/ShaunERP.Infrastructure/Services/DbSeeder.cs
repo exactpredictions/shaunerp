@@ -28,6 +28,7 @@ public class DbSeeder
         await EnsureCrmSchemaAsync(ct);
         await EnsureFinanceSchemaAsync(ct);
         await EnsureSalesOrderSchemaAsync(ct);
+        await AccountingSchema.EnsureAsync(_db, _logger, ct);
         await EnsureRolesAndPermissionsAsync(ct);
         await NormalizeCompanyModulesAsync(ct);
 
@@ -63,6 +64,7 @@ public class DbSeeder
                 Module(company.Id, ModuleKeys.Crm, "CRM"),
                 Module(company.Id, ModuleKeys.Finance, "Finance"),
                 Module(company.Id, ModuleKeys.Orders, "Sales Orders"),
+                Module(company.Id, ModuleKeys.Accounting, "Accounting"),
                 Module(company.Id, ModuleKeys.Hrms, "HRMS"),
                 Module(company.Id, ModuleKeys.Projects, "Projects"),
                 Module(company.Id, ModuleKeys.Users, "Users"));
@@ -195,7 +197,7 @@ public class DbSeeder
 
         await _db.SaveChangesAsync(ct);
 
-        // Ensure every company has Sales Orders entitlement enabled.
+        // Ensure every company has Sales Orders and Accounting entitlements enabled.
         var companyIds = await _db.Companies.Select(c => c.Id).ToListAsync(ct);
         var existing = await _db.CompanyModules.ToListAsync(ct);
         foreach (var companyId in companyIds)
@@ -206,6 +208,14 @@ public class DbSeeder
             if (!hasOrders)
             {
                 _db.CompanyModules.Add(Module(companyId, ModuleKeys.Orders, "Sales Orders"));
+            }
+
+            var hasAccounting = existing.Any(m =>
+                m.CompanyId == companyId &&
+                m.ModuleKey.Equals(ModuleKeys.Accounting, StringComparison.OrdinalIgnoreCase));
+            if (!hasAccounting)
+            {
+                _db.CompanyModules.Add(Module(companyId, ModuleKeys.Accounting, "Accounting"));
             }
         }
 

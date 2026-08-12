@@ -79,7 +79,11 @@ public class TenantIsolationTests
             Permissions = new HashSet<string>(Permissions.AdminDefaults, StringComparer.OrdinalIgnoreCase)
         });
 
-        var finance = new FinanceService(db, tenant, new ModuleRegistry());
+        var registry = new ModuleRegistry();
+        var audit = new NoopAudit();
+        var posting = new AccountingPostingService(db, tenant, registry, audit);
+        var accounting = new AccountingService(db, tenant, registry, posting, audit);
+        var finance = new FinanceService(db, tenant, registry, posting, accounting);
         var invoices = await finance.ListInvoicesAsync();
         Assert.Single(invoices);
         Assert.Equal(1, invoices[0].CompanyId);
@@ -119,5 +123,11 @@ public class TenantIsolationTests
     private sealed class TestDbFactory(DbContextOptions<ShaunErpDbContext> options) : IDbContextFactory<ShaunErpDbContext>
     {
         public ShaunErpDbContext CreateDbContext() => new(options);
+    }
+
+    private sealed class NoopAudit : IAuditService
+    {
+        public Task WriteAsync(string action, int? companyId = null, int? userId = null, string? entityType = null, string? entityId = null, string? beforeValues = null, string? afterValues = null, string? correlationId = null, string? ipAddress = null, string? userAgent = null, CancellationToken ct = default)
+            => Task.CompletedTask;
     }
 }

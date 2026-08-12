@@ -170,6 +170,8 @@ public class ModuleRegistryTests
     [InlineData("user-management", "users")]
     [InlineData("sales-orders", "orders")]
     [InlineData("Sales Orders", "orders")]
+    [InlineData("accounting", "accounting")]
+    [InlineData("books", "accounting")]
     public void ModuleKeys_Normalize(string input, string expected)
     {
         Assert.Equal(expected, ModuleKeys.Normalize(input));
@@ -183,5 +185,15 @@ public class ModuleRegistryTests
         Assert.False(module!.IsPlaceholder);
         Assert.True(module.IsEnabled);
         Assert.Contains(module.NavigationItems, n => n.Route == "/orders/list");
+    }
+
+    [Fact]
+    public void AccountingModule_IsEnabledInCatalog()
+    {
+        var module = _registry.GetByKey(ModuleKeys.Accounting);
+        Assert.NotNull(module);
+        Assert.False(module!.IsPlaceholder);
+        Assert.True(module.IsEnabled);
+        Assert.Contains(module.NavigationItems, n => n.Route == "/accounting/vouchers/journal");
     }
 }

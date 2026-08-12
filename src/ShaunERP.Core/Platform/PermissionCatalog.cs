@@ -94,6 +94,23 @@ public static class Permissions
     public const string OrdersCancel = "orders.cancel";
     public const string OrdersCreateInvoice = "orders.create_invoice";
 
+    public const string AccountingAccess = "accounting.access";
+    public const string AccountingView = "accounting.view";
+    public const string AccountingLedgersView = "accounting.ledgers.view";
+    public const string AccountingLedgersCreate = "accounting.ledgers.create";
+    public const string AccountingLedgersEdit = "accounting.ledgers.edit";
+    public const string AccountingVouchersView = "accounting.vouchers.view";
+    public const string AccountingVouchersCreate = "accounting.vouchers.create";
+    public const string AccountingVouchersPost = "accounting.vouchers.post";
+    public const string AccountingVouchersReverse = "accounting.vouchers.reverse";
+    public const string AccountingReportsView = "accounting.reports.view";
+    public const string AccountingSettingsManage = "accounting.settings.manage";
+    public const string AccountingFinancialYearManage = "accounting.financialyear.manage";
+    public const string AccountingPeriodLockManage = "accounting.periodlock.manage";
+    public const string CompanySettingsView = "company.settings.view";
+    public const string CompanySettingsEdit = "company.settings.edit";
+    public const string GstSettingsManage = "gst.settings.manage";
+
     public const string PlatformAccess = "platform.access";
     public const string PlatformTenantsManage = "platform.tenants.manage";
     public const string PlatformModulesManage = "platform.modules.manage";
@@ -121,6 +138,10 @@ public static class Permissions
         FinanceInvoicesMarkPaid, FinancePaymentsRecord, FinanceSettingsManage, FinanceCustomersView,
         OrdersAccess, OrdersDashboardView, OrdersView, OrdersCreate, OrdersUpdate, OrdersDelete,
         OrdersConfirm, OrdersFulfill, OrdersCancel, OrdersCreateInvoice,
+        AccountingAccess, AccountingView, AccountingLedgersView, AccountingLedgersCreate, AccountingLedgersEdit,
+        AccountingVouchersView, AccountingVouchersCreate, AccountingVouchersPost, AccountingVouchersReverse,
+        AccountingReportsView, AccountingSettingsManage, AccountingFinancialYearManage, AccountingPeriodLockManage,
+        CompanySettingsView, CompanySettingsEdit, GstSettingsManage,
         PlatformAccess, PlatformTenantsManage, PlatformModulesManage
     ];
 
@@ -150,7 +171,11 @@ public static class Permissions
         FinanceInvoicesView, FinanceInvoicesCreate, FinanceInvoicesUpdate, FinanceInvoicesDelete,
         FinanceInvoicesMarkPaid, FinancePaymentsRecord, FinanceSettingsManage, FinanceCustomersView,
         OrdersAccess, OrdersDashboardView, OrdersView, OrdersCreate, OrdersUpdate, OrdersDelete,
-        OrdersConfirm, OrdersFulfill, OrdersCancel, OrdersCreateInvoice
+        OrdersConfirm, OrdersFulfill, OrdersCancel, OrdersCreateInvoice,
+        AccountingAccess, AccountingView, AccountingLedgersView, AccountingLedgersCreate, AccountingLedgersEdit,
+        AccountingVouchersView, AccountingVouchersCreate, AccountingVouchersPost, AccountingVouchersReverse,
+        AccountingReportsView, AccountingSettingsManage, AccountingFinancialYearManage, AccountingPeriodLockManage,
+        CompanySettingsView, CompanySettingsEdit, GstSettingsManage
     ];
 
     public static IReadOnlyList<string> UserDefaults { get; } =
@@ -171,6 +196,9 @@ public static class Permissions
         FinanceInvoicesView, FinanceInvoicesCreate, FinanceInvoicesUpdate,
         FinanceInvoicesMarkPaid, FinancePaymentsRecord, FinanceCustomersView,
         OrdersAccess, OrdersDashboardView, OrdersView, OrdersCreate, OrdersUpdate,
-        OrdersConfirm, OrdersCreateInvoice
+        OrdersConfirm, OrdersCreateInvoice,
+        AccountingAccess, AccountingView, AccountingLedgersView,
+        AccountingVouchersView, AccountingVouchersCreate, AccountingReportsView,
+        CompanySettingsView
     ];
 }

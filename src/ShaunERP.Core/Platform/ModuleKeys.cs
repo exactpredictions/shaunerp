@@ -7,6 +7,7 @@ public static class ModuleKeys
     public const string Crm = "crm";
     public const string Finance = "finance";
     public const string Orders = "orders";
+    public const string Accounting = "accounting";
     public const string Hrms = "hrms";
     public const string Projects = "projects";
     public const string Platform = "platform";
@@ -23,7 +24,8 @@ public static class ModuleKeys
         {
             "user" or "usermanagement" or "user-management" => Users,
             "crm" or "customer-relationship" or "customer relationship" => Crm,
-            "finance" or "invoicing" or "accounting" => Finance,
+            "finance" or "invoicing" => Finance,
+            "accounting" or "accounts" or "books" or "gl" => Accounting,
             "orders" or "sales" or "salesorders" or "sales-orders" or "order" => Orders,
             "hrms" or "hr" or "human-resources" or "human resources" => Hrms,
             "projects" or "project" => Projects,

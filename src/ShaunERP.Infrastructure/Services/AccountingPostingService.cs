@@ -1,0 +1,401 @@
+using Microsoft.EntityFrameworkCore;
+using ShaunERP.Core.Accounting;
+using ShaunERP.Core.Platform;
+using ShaunERP.Infrastructure.Persistence;
+using ShaunERP.Infrastructure.Platform;
+
+namespace ShaunERP.Infrastructure.Services;
+
+public interface IAccountingPostingService
+{
+    Task<AccountingVoucher> PostAsync(AccountingPostingRequest request, CancellationToken ct = default);
+    Task<AccountingVoucher> PostDraftAsync(int voucherId, CancellationToken ct = default);
+    Task<AccountingVoucher> ReverseAsync(int voucherId, string? reason = null, CancellationToken ct = default);
+    Task<AccountingVoucher?> FindBySourceAsync(
+        string sourceModule, string sourceEntityType, string sourceEntityId, string? postingType = "Primary",
+        CancellationToken ct = default);
+}
+
+public sealed class AccountingPostingService : IAccountingPostingService
+{
+    private readonly ShaunErpDbContext _db;
+    private readonly ITenantContext _tenant;
+    private readonly IModuleRegistry _modules;
+    private readonly IAuditService _audit;
+
+    public AccountingPostingService(
+        ShaunErpDbContext db,
+        ITenantContext tenant,
+        IModuleRegistry modules,
+        IAuditService audit)
+    {
+        _db = db;
+        _tenant = tenant;
+        _modules = modules;
+        _audit = audit;
+    }
+
+    public async Task<AccountingVoucher?> FindBySourceAsync(
+        string sourceModule, string sourceEntityType, string sourceEntityId, string? postingType = "Primary",
+        CancellationToken ct = default)
+    {
+        var companyId = RequireCompanyId();
+        postingType ??= "Primary";
+        return await _db.AccountingVouchers.AsNoTracking()
+            .Include(v => v.Lines)
+            .Where(v => v.CompanyId == companyId
+                        && v.SourceModule == sourceModule
+                        && v.SourceEntityType == sourceEntityType
+                        && v.SourceEntityId == sourceEntityId
+                        && v.PostingType == postingType
+                        && v.VoucherStatus == VoucherStatus.Posted)
+            .OrderByDescending(v => v.Id)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    public async Task<AccountingVoucher> PostAsync(AccountingPostingRequest request, CancellationToken ct = default)
+    {
+        EnsureAccess(Permissions.AccountingVouchersPost);
+        var companyId = RequireCompanyId();
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Lines is null || request.Lines.Count < 2)
+            throw new InvalidOperationException("A voucher requires at least two lines.");
+
+        NormalizeLines(request.Lines);
+        ValidateBalance(request.Lines);
+
+        if (!string.IsNullOrWhiteSpace(request.SourceModule)
+            && !string.IsNullOrWhiteSpace(request.SourceEntityType)
+            && !string.IsNullOrWhiteSpace(request.SourceEntityId))
+        {
+            var existing = await FindBySourceAsync(
+                request.SourceModule, request.SourceEntityType!, request.SourceEntityId!,
+                request.PostingType ?? "Primary", ct);
+            if (existing is not null)
+                return existing;
+        }
+
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+        try
+        {
+            var fy = await ResolveFinancialYearAsync(companyId, request.FinancialYearId, request.TransactionDate, ct);
+            if (fy.IsClosed)
+                throw new InvalidOperationException("Financial year is closed.");
+
+            await EnsureNotLockedAsync(companyId, request.TransactionDate, ct);
+
+            var voucherType = await _db.VoucherTypes
+                .FirstOrDefaultAsync(v => v.CompanyId == companyId
+                                          && v.Code == request.VoucherTypeCode
+                                          && v.IsActive, ct)
+                ?? throw new InvalidOperationException($"Voucher type '{request.VoucherTypeCode}' was not found.");
+
+            var ledgers = await ResolveLedgersAsync(companyId, request.Lines, ct);
+            var voucherNumber = string.IsNullOrWhiteSpace(request.VoucherNumber)
+                ? await NextVoucherNumberAsync(voucherType, fy, ct)
+                : request.VoucherNumber.Trim();
+
+            if (await _db.AccountingVouchers.AnyAsync(v => v.CompanyId == companyId && v.VoucherNumber == voucherNumber, ct))
+                throw new InvalidOperationException("Voucher number must be unique.");
+
+            var totalDebit = request.Lines.Sum(l => l.Debit);
+            var totalCredit = request.Lines.Sum(l => l.Credit);
+            var now = DateTime.UtcNow;
+            var user = _tenant.UserId?.ToString() ?? "system";
+
+            var voucher = new AccountingVoucher
+            {
+                CompanyId = companyId,
+                FinancialYearId = fy.Id,
+                VoucherTypeId = voucherType.Id,
+                VoucherNumber = voucherNumber,
+                VoucherDate = NormalizeDate(request.TransactionDate),
+                ReferenceNumber = request.ReferenceNumber,
+                ReferenceDate = NormalizeDateNullable(request.ReferenceDate),
+                Narration = request.Narration,
+                VoucherStatus = request.PostImmediately ? VoucherStatus.Posted : VoucherStatus.Draft,
+                SourceModule = request.SourceModule,
+                SourceEntityType = request.SourceEntityType,
+                SourceEntityId = request.SourceEntityId,
+                PostingType = request.PostingType ?? "Primary",
+                CurrencyId = request.CurrencyId,
+                ExchangeRate = request.ExchangeRate <= 0 ? 1m : request.ExchangeRate,
+                TotalDebit = totalDebit,
+                TotalCredit = totalCredit,
+                CreatedBy = user,
+                CreatedDate = now,
+                PostedBy = request.PostImmediately ? user : null,
+                PostedAt = request.PostImmediately ? now : null
+            };
+
+            var sort = 0;
+            foreach (var line in request.Lines)
+            {
+                var ledger = ledgers[ResolveLedgerKey(line)];
+                voucher.Lines.Add(new AccountingVoucherLine
+                {
+                    CompanyId = companyId,
+                    LedgerId = ledger.Id,
+                    DebitAmount = line.Debit,
+                    CreditAmount = line.Credit,
+                    Description = line.Description,
+                    CostCenterId = line.CostCenterId,
+                    ProjectId = line.ProjectId,
+                    TaxId = line.TaxId,
+                    CustomerId = line.CustomerId,
+                    SupplierId = line.SupplierId,
+                    DueDate = NormalizeDateNullable(line.DueDate),
+                    ReferenceType = line.ReferenceType,
+                    ReferenceId = line.ReferenceId,
+                    SortOrder = sort++,
+                    CreatedDate = now,
+                    CreatedBy = user
+                });
+            }
+
+            _db.AccountingVouchers.Add(voucher);
+            await _db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+
+            await _audit.WriteAsync(
+                request.PostImmediately ? "accounting.voucher.posted" : "accounting.voucher.created",
+                companyId, _tenant.UserId, nameof(AccountingVoucher), voucher.Id.ToString(),
+                afterValues: $"{voucher.VoucherNumber}|{voucher.TotalDebit}|{voucher.TotalCredit}",
+                ct: ct);
+
+            return await _db.AccountingVouchers
+                .Include(v => v.Lines).ThenInclude(l => l.Ledger)
+                .Include(v => v.VoucherType)
+                .FirstAsync(v => v.Id == voucher.Id, ct);
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
+    }
+
+    public async Task<AccountingVoucher> PostDraftAsync(int voucherId, CancellationToken ct = default)
+    {
+        EnsureAccess(Permissions.AccountingVouchersPost);
+        var companyId = RequireCompanyId();
+        var voucher = await _db.AccountingVouchers
+            .Include(v => v.Lines)
+            .Include(v => v.FinancialYear)
+            .FirstOrDefaultAsync(v => v.Id == voucherId && v.CompanyId == companyId, ct)
+            ?? throw new InvalidOperationException("Voucher not found.");
+
+        if (voucher.VoucherStatus != VoucherStatus.Draft)
+            throw new InvalidOperationException("Only draft vouchers can be posted.");
+
+        if (voucher.FinancialYear?.IsClosed == true)
+            throw new InvalidOperationException("Financial year is closed.");
+
+        await EnsureNotLockedAsync(companyId, voucher.VoucherDate, ct);
+
+        var debit = voucher.Lines.Sum(l => l.DebitAmount);
+        var credit = voucher.Lines.Sum(l => l.CreditAmount);
+        if (debit != credit || debit <= 0)
+            throw new InvalidOperationException("Voucher is not balanced.");
+
+        voucher.TotalDebit = debit;
+        voucher.TotalCredit = credit;
+        voucher.VoucherStatus = VoucherStatus.Posted;
+        voucher.PostedBy = _tenant.UserId?.ToString();
+        voucher.PostedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.WriteAsync(
+            "accounting.voucher.posted", companyId, _tenant.UserId,
+            nameof(AccountingVoucher), voucher.Id.ToString(), ct: ct);
+
+        return voucher;
+    }
+
+    public async Task<AccountingVoucher> ReverseAsync(int voucherId, string? reason = null, CancellationToken ct = default)
+    {
+        EnsureAccess(Permissions.AccountingVouchersReverse);
+        var companyId = RequireCompanyId();
+        var original = await _db.AccountingVouchers
+            .Include(v => v.Lines)
+            .Include(v => v.VoucherType)
+            .Include(v => v.FinancialYear)
+            .FirstOrDefaultAsync(v => v.Id == voucherId && v.CompanyId == companyId, ct)
+            ?? throw new InvalidOperationException("Voucher not found.");
+
+        if (original.VoucherStatus != VoucherStatus.Posted)
+            throw new InvalidOperationException("Only posted vouchers can be reversed.");
+        if (original.ReversedByVoucherId is not null)
+            throw new InvalidOperationException("This voucher has already been reversed.");
+
+        var request = new AccountingPostingRequest
+        {
+            FinancialYearId = original.FinancialYearId,
+            TransactionDate = DateTime.UtcNow.Date,
+            VoucherTypeCode = original.VoucherType?.Code ?? SystemVoucherTypeCodes.Journal,
+            ReferenceNumber = original.VoucherNumber,
+            Narration = string.IsNullOrWhiteSpace(reason)
+                ? $"Reversal of {original.VoucherNumber}"
+                : $"Reversal of {original.VoucherNumber}: {reason}",
+            SourceModule = original.SourceModule ?? AccountingSourceModules.Manual,
+            SourceEntityType = original.SourceEntityType,
+            SourceEntityId = original.SourceEntityId,
+            PostingType = $"Reversal:{original.Id}",
+            CurrencyId = original.CurrencyId,
+            ExchangeRate = original.ExchangeRate,
+            PostImmediately = true,
+            Lines = original.Lines.OrderBy(l => l.SortOrder).Select(l => new AccountingPostingLineRequest
+            {
+                LedgerId = l.LedgerId,
+                Debit = l.CreditAmount,
+                Credit = l.DebitAmount,
+                Description = l.Description,
+                CostCenterId = l.CostCenterId,
+                ProjectId = l.ProjectId,
+                TaxId = l.TaxId,
+                CustomerId = l.CustomerId,
+                SupplierId = l.SupplierId,
+                ReferenceType = l.ReferenceType,
+                ReferenceId = l.ReferenceId
+            }).ToList()
+        };
+
+        var reversal = await PostAsync(request, ct);
+        original.VoucherStatus = VoucherStatus.Reversed;
+        original.ReversedBy = _tenant.UserId?.ToString();
+        original.ReversedAt = DateTime.UtcNow;
+        original.ReversedByVoucherId = reversal.Id;
+        reversal.ReversalOfVoucherId = original.Id;
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.WriteAsync(
+            "accounting.voucher.reversed", companyId, _tenant.UserId,
+            nameof(AccountingVoucher), original.Id.ToString(),
+            afterValues: reversal.VoucherNumber, ct: ct);
+
+        return reversal;
+    }
+
+    private async Task<Dictionary<string, Ledger>> ResolveLedgersAsync(
+        int companyId, List<AccountingPostingLineRequest> lines, CancellationToken ct)
+    {
+        var result = new Dictionary<string, Ledger>(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in lines)
+        {
+            var key = ResolveLedgerKey(line);
+            if (result.ContainsKey(key)) continue;
+
+            Ledger? ledger = null;
+            if (line.LedgerId is > 0)
+            {
+                ledger = await _db.Ledgers.FirstOrDefaultAsync(
+                    l => l.Id == line.LedgerId && l.CompanyId == companyId, ct);
+            }
+            else if (!string.IsNullOrWhiteSpace(line.LedgerSystemCode))
+            {
+                ledger = await _db.Ledgers.FirstOrDefaultAsync(
+                    l => l.CompanyId == companyId && l.SystemCode == line.LedgerSystemCode, ct);
+            }
+
+            if (ledger is null)
+                throw new InvalidOperationException("Ledger does not belong to the selected company or was not found.");
+            if (!ledger.IsActive)
+                throw new InvalidOperationException($"Ledger '{ledger.LedgerName}' is inactive.");
+
+            result[key] = ledger;
+        }
+
+        return result;
+    }
+
+    private static string ResolveLedgerKey(AccountingPostingLineRequest line)
+        => line.LedgerId is > 0 ? $"id:{line.LedgerId}" : $"sys:{line.LedgerSystemCode}";
+
+    private async Task<FinancialYear> ResolveFinancialYearAsync(
+        int companyId, int? financialYearId, DateTime date, CancellationToken ct)
+    {
+        var d = NormalizeDate(date);
+        if (financialYearId is > 0)
+        {
+            return await _db.FinancialYears.FirstOrDefaultAsync(
+                       y => y.Id == financialYearId && y.CompanyId == companyId, ct)
+                   ?? throw new InvalidOperationException("Financial year not found.");
+        }
+
+        var fy = await _db.FinancialYears.FirstOrDefaultAsync(
+            y => y.CompanyId == companyId && y.StartDate <= d && y.EndDate >= d, ct);
+        if (fy is null)
+            throw new InvalidOperationException("Voucher date must fall within a financial year.");
+        return fy;
+    }
+
+    private async Task EnsureNotLockedAsync(int companyId, DateTime date, CancellationToken ct)
+    {
+        var d = NormalizeDate(date);
+        var lockRow = await _db.AccountingPeriodLocks.AsNoTracking()
+            .Where(l => l.CompanyId == companyId)
+            .OrderByDescending(l => l.LockedThroughDate)
+            .FirstOrDefaultAsync(ct);
+        if (lockRow is not null && d.Date <= lockRow.LockedThroughDate.Date)
+        {
+            throw new InvalidOperationException(
+                $"Accounting period is locked through {lockRow.LockedThroughDate:dd-MMM-yyyy}.");
+        }
+    }
+
+    private async Task<string> NextVoucherNumberAsync(VoucherType voucherType, FinancialYear fy, CancellationToken ct)
+    {
+        voucherType.CurrentSequence += 1;
+        await _db.SaveChangesAsync(ct);
+        var fyToken = fy.Name.Replace(" ", "");
+        return $"{voucherType.Prefix}/{fyToken}/{voucherType.CurrentSequence:D6}";
+    }
+
+    private static void NormalizeLines(List<AccountingPostingLineRequest> lines)
+    {
+        foreach (var line in lines)
+        {
+            if (line.Debit < 0 || line.Credit < 0)
+                throw new InvalidOperationException("Debit and credit amounts cannot be negative.");
+            if (line.Debit > 0 && line.Credit > 0)
+                throw new InvalidOperationException("Each line should normally have either Debit or Credit, not both.");
+            if (line.Debit == 0 && line.Credit == 0)
+                throw new InvalidOperationException("Each voucher line must have a debit or credit amount.");
+            line.Debit = Math.Round(line.Debit, 2);
+            line.Credit = Math.Round(line.Credit, 2);
+        }
+    }
+
+    private static void ValidateBalance(List<AccountingPostingLineRequest> lines)
+    {
+        var debit = lines.Sum(l => l.Debit);
+        var credit = lines.Sum(l => l.Credit);
+        if (debit != credit)
+            throw new InvalidOperationException("Voucher is not balanced.");
+        if (debit <= 0)
+            throw new InvalidOperationException("Voucher totals must be greater than zero.");
+    }
+
+    private void EnsureAccess(string permission)
+    {
+        if (!_modules.HasEntitlement(_tenant, ModuleKeys.Accounting) || !_modules.HasPermission(_tenant, permission))
+            throw new UnauthorizedAccessException("Accounting access denied.");
+    }
+
+    private int RequireCompanyId()
+        => _tenant.CompanyId ?? throw new InvalidOperationException("Tenant context is required.");
+
+    private static DateTime NormalizeDate(DateTime value)
+    {
+        var d = value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
+        };
+        return d.Date;
+    }
+
+    private static DateTime? NormalizeDateNullable(DateTime? value)
+        => value is null ? null : NormalizeDate(value.Value);
+}

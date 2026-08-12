@@ -1,0 +1,220 @@
+@page "/accounting/vouchers/journal"
+@page "/accounting/vouchers/receipt"
+@page "/accounting/vouchers/payment"
+@page "/accounting/vouchers/contra"
+@page "/accounting/vouchers/{Id:int}"
+@attribute [Authorize]
+@inject IAccountingService Accounting
+@inject IAccountingPostingService Posting
+@inject NavigationManager Nav
+@inject ITenantContext Tenant
+@inject IModuleRegistry Modules
+@inject ShellStateService Shell
+
+<PageTitle>@(_title) — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">Accounting · Voucher</p>
+            <h1>@_title</h1>
+            <p class="muted">Debit and credit totals must match before posting.</p>
+        </div>
+        <a class="btn ghost" href="/accounting/vouchers">Back</a>
+    </header>
+
+    @if (_error is not null) { <div class="error-state">@_error</div> }
+    @if (_message is not null) { <div class="success-state">@_message</div> }
+
+    @if (_view is not null)
+    {
+        <div class="panel invoice-panel">
+            <div class="form-grid">
+                <label>Number<input value="@_view.VoucherNumber" readonly /></label>
+                <label>Date<input value="@_view.VoucherDate.ToString("yyyy-MM-dd")" readonly /></label>
+                <label>Status<input value="@_view.VoucherStatus" readonly /></label>
+                <label class="span-2">Narration<input value="@(_view.Narration ?? "")" readonly /></label>
+            </div>
+            <table class="data-table invoice-lines">
+                <thead><tr><th>Ledger</th><th class="num">Debit</th><th class="num">Credit</th><th>Description</th></tr></thead>
+                <tbody>
+                @foreach (var l in _view.Lines.OrderBy(x => x.SortOrder))
+                {
+                    <tr>
+                        <td>@(l.Ledger?.LedgerName ?? l.LedgerId.ToString())</td>
+                        <td class="num">@l.DebitAmount.ToString("N2")</td>
+                        <td class="num">@l.CreditAmount.ToString("N2")</td>
+                        <td>@(l.Description ?? "")</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            @if (_view.VoucherStatus == VoucherStatus.Posted)
+            {
+                <div class="form-actions">
+                    <button class="btn danger" @onclick="ReverseAsync" disabled="@_busy">Reverse voucher</button>
+                </div>
+            }
+        </div>
+    }
+    else if (!_loading)
+    {
+        <div class="panel invoice-panel">
+            <div class="form-grid">
+                <label>Date<input type="date" @bind="_date" /></label>
+                <label>Reference<input @bind="_reference" /></label>
+                <label class="span-2">Narration<input @bind="_narration" /></label>
+            </div>
+
+            <table class="data-table invoice-lines">
+                <thead><tr><th>Ledger</th><th class="num">Debit</th><th class="num">Credit</th><th>Description</th><th></th></tr></thead>
+                <tbody>
+                @for (var i = 0; i < _lines.Count; i++)
+                {
+                    var idx = i;
+                    <tr>
+                        <td>
+                            <select @bind="_lines[idx].LedgerId">
+                                <option value="0">— Select —</option>
+                                @foreach (var l in _ledgers)
+                                {
+                                    <option value="@l.Id">@l.LedgerName</option>
+                                }
+                            </select>
+                        </td>
+                        <td class="num"><input type="number" step="0.01" @bind="_lines[idx].Debit" @bind:event="oninput" /></td>
+                        <td class="num"><input type="number" step="0.01" @bind="_lines[idx].Credit" @bind:event="oninput" /></td>
+                        <td><input @bind="_lines[idx].Description" /></td>
+                        <td><button type="button" class="btn ghost" disabled="@(_lines.Count <= 2)" @onclick="() => RemoveLine(idx)">×</button></td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            <div class="form-actions">
+                <button type="button" class="btn ghost" @onclick="AddLine">+ Add line</button>
+            </div>
+            <div class="invoice-totals">
+                <div>Total debit <strong>@_totalDebit.ToString("N2")</strong></div>
+                <div>Total credit <strong>@_totalCredit.ToString("N2")</strong></div>
+                <div>Difference <strong class="@(_diff == 0 ? "" : "text-danger")">@_diff.ToString("N2")</strong></div>
+            </div>
+            <div class="form-actions">
+                <button class="btn" disabled="@(_busy || _diff != 0 || _totalDebit <= 0)" @onclick="SaveAsync">Post voucher</button>
+            </div>
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private string? _message;
+    private string _title = "Voucher";
+    private string _typeCode = SystemVoucherTypeCodes.Journal;
+    private DateTime _date = DateTime.UtcNow.Date;
+    private string? _reference;
+    private string? _narration;
+    private List<Ledger> _ledgers = new();
+    private List<LineModel> _lines = new();
+    private AccountingVoucher? _view;
+
+    private decimal _totalDebit => _lines.Sum(l => l.Debit);
+    private decimal _totalCredit => _lines.Sum(l => l.Credit);
+    private decimal _diff => Math.Round(_totalDebit - _totalCredit, 2);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Shell.InitializeAsync();
+        var mod = Modules.GetByKey(ModuleKeys.Accounting);
+        if (mod is null || !Modules.CanAccessModule(mod, Tenant))
+        {
+            _error = "Access denied.";
+            _loading = false;
+            return;
+        }
+
+        var path = Nav.ToBaseRelativePath(Nav.Uri).Trim('/').ToLowerInvariant();
+        if (path.Contains("/receipt")) { _typeCode = SystemVoucherTypeCodes.Receipt; _title = "Receipt voucher"; }
+        else if (path.Contains("/payment")) { _typeCode = SystemVoucherTypeCodes.Payment; _title = "Payment voucher"; }
+        else if (path.Contains("/contra")) { _typeCode = SystemVoucherTypeCodes.Contra; _title = "Contra voucher"; }
+        else if (Id is null or 0) { _typeCode = SystemVoucherTypeCodes.Journal; _title = "Journal voucher"; }
+
+        try
+        {
+            await Accounting.EnsureBootstrapAsync();
+            if (Id is > 0)
+            {
+                _view = await Accounting.GetVoucherAsync(Id.Value);
+                _title = _view is null ? "Voucher" : $"Voucher {_view.VoucherNumber}";
+                if (_view is null) _error = "Voucher not found.";
+            }
+            else
+            {
+                _ledgers = (await Accounting.ListLedgersAsync()).ToList();
+                _lines =
+                [
+                    new LineModel(),
+                    new LineModel()
+                ];
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private void AddLine() => _lines.Add(new LineModel());
+    private void RemoveLine(int idx) { if (_lines.Count > 2) _lines.RemoveAt(idx); }
+
+    private async Task SaveAsync()
+    {
+        _busy = true; _error = null; _message = null;
+        try
+        {
+            var voucher = await Posting.PostAsync(new AccountingPostingRequest
+            {
+                TransactionDate = _date,
+                VoucherTypeCode = _typeCode,
+                ReferenceNumber = _reference,
+                Narration = _narration,
+                SourceModule = AccountingSourceModules.Manual,
+                PostImmediately = true,
+                Lines = _lines.Where(l => l.LedgerId > 0 && (l.Debit > 0 || l.Credit > 0))
+                    .Select(l => new AccountingPostingLineRequest
+                    {
+                        LedgerId = l.LedgerId,
+                        Debit = l.Debit,
+                        Credit = l.Credit,
+                        Description = l.Description
+                    }).ToList()
+            });
+            Nav.NavigateTo($"/accounting/vouchers/{voucher.Id}");
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ReverseAsync()
+    {
+        if (_view is null) return;
+        _busy = true; _error = null;
+        try
+        {
+            var rev = await Posting.ReverseAsync(_view.Id);
+            _message = $"Reversed as {rev.VoucherNumber}";
+            _view = await Accounting.GetVoucherAsync(_view.Id);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private sealed class LineModel
+    {
+        public int LedgerId { get; set; }
+        public decimal Debit { get; set; }
+        public decimal Credit { get; set; }
+        public string? Description { get; set; }
+    }
+}

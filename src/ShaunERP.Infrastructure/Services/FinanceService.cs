@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using ShaunERP.Core.Accounting;
 using ShaunERP.Core.Crm;
 using ShaunERP.Core.Finance;
 using ShaunERP.Core.Platform;
@@ -50,12 +51,21 @@ public class FinanceService : IFinanceService
     private readonly ShaunErpDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly IModuleRegistry _modules;
+    private readonly IAccountingPostingService _accountingPosting;
+    private readonly IAccountingService _accounting;
 
-    public FinanceService(ShaunErpDbContext db, ITenantContext tenant, IModuleRegistry modules)
+    public FinanceService(
+        ShaunErpDbContext db,
+        ITenantContext tenant,
+        IModuleRegistry modules,
+        IAccountingPostingService accountingPosting,
+        IAccountingService accounting)
     {
         _db = db;
         _tenant = tenant;
         _modules = modules;
+        _accountingPosting = accountingPosting;
+        _accounting = accounting;
     }
 
     public async Task<FinanceDashboardStats> GetDashboardAsync(CancellationToken ct = default)
@@ -363,6 +373,21 @@ public class FinanceService : IFinanceService
         if (row.InvoiceStatus == InvoiceStatus.Draft)
             row.InvoiceStatus = InvoiceStatus.Sent;
         await _db.SaveChangesAsync(ct);
+
+        try
+        {
+            await PostInvoiceAccountingAsync(row, ct);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Accounting module may be disabled; invoicing still succeeds.
+        }
+        catch (Exception)
+        {
+            // Surface accounting failures — invoice is already Sent; caller can retry posting from accounting.
+            throw;
+        }
+
         return row;
     }
 
@@ -378,6 +403,15 @@ public class FinanceService : IFinanceService
         row.InvoiceStatus = InvoiceStatus.Void;
         row.IsPaid = false;
         await _db.SaveChangesAsync(ct);
+
+        try
+        {
+            await ReverseInvoiceAccountingAsync(row, ct);
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
         return row;
     }
 
@@ -614,6 +648,126 @@ public class FinanceService : IFinanceService
         invoice.IsPaid = invoice.InvoiceStatus == InvoiceStatus.Paid;
         if (invoice.IsPaid)
             invoice.AmountPaid = invoice.GrandTotal > 0 ? invoice.GrandTotal : invoice.Amount;
+    }
+
+    private async Task PostInvoiceAccountingAsync(Invoice invoice, CancellationToken ct)
+    {
+        if (!_modules.HasEntitlement(_tenant, ModuleKeys.Accounting))
+            return;
+
+        var settings = await _db.AccountingSettings.AsNoTracking()
+            .FirstOrDefaultAsync(s => s.CompanyId == RequireCompanyId(), ct);
+        if (settings is not null && !settings.AutoPostSalesInvoice)
+            return;
+
+        if (invoice.AccountingVoucherId is > 0)
+            return;
+
+        var existing = await _accountingPosting.FindBySourceAsync(
+            AccountingSourceModules.Sales, nameof(Invoice), invoice.Id.ToString(), "Primary", ct);
+        if (existing is not null)
+        {
+            invoice.AccountingVoucherId = existing.Id;
+            await _db.SaveChangesAsync(ct);
+            return;
+        }
+
+        await _accounting.EnsureBootstrapAsync(ct);
+
+        int? customerLedgerId = null;
+        if (invoice.CustomerId is > 0)
+        {
+            var customer = await _db.CrmCustomers.FirstOrDefaultAsync(c => c.Id == invoice.CustomerId, ct);
+            if (customer is not null)
+            {
+                var custLedger = await _accounting.EnsureCustomerLedgerAsync(customer, ct);
+                customerLedgerId = custLedger.Id;
+            }
+        }
+
+        var taxable = invoice.GrandTotal > 0
+            ? Math.Max(0, invoice.GrandTotal - invoice.TaxTotal)
+            : Math.Max(0, invoice.Amount - invoice.TaxTotal);
+        var tax = invoice.TaxTotal;
+        var total = invoice.GrandTotal > 0 ? invoice.GrandTotal : invoice.Amount;
+        if (total <= 0) return;
+
+        var lines = new List<AccountingPostingLineRequest>
+        {
+            new()
+            {
+                LedgerId = customerLedgerId,
+                LedgerSystemCode = customerLedgerId is null ? SystemLedgerCodes.AccountsReceivable : null,
+                Debit = total,
+                Description = $"Invoice {invoice.InvoiceNumber}",
+                CustomerId = invoice.CustomerId,
+                ReferenceType = nameof(Invoice),
+                ReferenceId = invoice.Id.ToString()
+            },
+            new()
+            {
+                LedgerSystemCode = SystemLedgerCodes.Sales,
+                Credit = taxable,
+                Description = $"Sales {invoice.InvoiceNumber}"
+            }
+        };
+
+        if (tax > 0)
+        {
+            var half = Math.Round(tax / 2m, 2);
+            var other = tax - half;
+            lines.Add(new AccountingPostingLineRequest
+            {
+                LedgerSystemCode = SystemLedgerCodes.CgstOutput,
+                Credit = half,
+                Description = "Output CGST"
+            });
+            lines.Add(new AccountingPostingLineRequest
+            {
+                LedgerSystemCode = SystemLedgerCodes.SgstOutput,
+                Credit = other,
+                Description = "Output SGST"
+            });
+        }
+
+        var voucher = await _accountingPosting.PostAsync(new AccountingPostingRequest
+        {
+            TransactionDate = invoice.InvoiceDate,
+            VoucherTypeCode = SystemVoucherTypeCodes.Sales,
+            ReferenceNumber = invoice.InvoiceNumber,
+            ReferenceDate = invoice.InvoiceDate,
+            Narration = $"Sales invoice {invoice.InvoiceNumber}",
+            SourceModule = AccountingSourceModules.Sales,
+            SourceEntityType = nameof(Invoice),
+            SourceEntityId = invoice.Id.ToString(),
+            PostingType = "Primary",
+            PostImmediately = true,
+            Lines = lines
+        }, ct);
+
+        invoice.AccountingVoucherId = voucher.Id;
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private async Task ReverseInvoiceAccountingAsync(Invoice invoice, CancellationToken ct)
+    {
+        if (!_modules.HasEntitlement(_tenant, ModuleKeys.Accounting))
+            return;
+
+        AccountingVoucher? voucher = null;
+        if (invoice.AccountingVoucherId is > 0)
+        {
+            voucher = await _db.AccountingVouchers.FirstOrDefaultAsync(
+                v => v.Id == invoice.AccountingVoucherId && v.CompanyId == invoice.CompanyId, ct);
+        }
+
+        voucher ??= await _accountingPosting.FindBySourceAsync(
+            AccountingSourceModules.Sales, nameof(Invoice), invoice.Id.ToString(), "Primary", ct);
+
+        if (voucher is null || voucher.VoucherStatus != VoucherStatus.Posted)
+            return;
+
+        await _accountingPosting.ReverseAsync(voucher.Id, $"Invoice {invoice.InvoiceNumber} voided", ct);
     }
 
     private IQueryable<Invoice> TenantInvoices(IQueryable<Invoice> query)

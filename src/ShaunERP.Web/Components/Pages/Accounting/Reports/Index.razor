@@ -1,0 +1,221 @@
+@page "/accounting/reports/general-ledger"
+@page "/accounting/reports/trial-balance"
+@page "/accounting/reports/profit-loss"
+@page "/accounting/reports/balance-sheet"
+@page "/accounting/reports/day-book"
+@page "/accounting/reports/cash-book"
+@page "/accounting/reports/bank-book"
+@page "/accounting/reports/receivables"
+@page "/accounting/reports/payables"
+@attribute [Authorize]
+@inject IAccountingService Accounting
+@inject IAccountingReportService Reports
+@inject NavigationManager Nav
+@inject ShellStateService Shell
+@inject ITenantContext Tenant
+@inject IModuleRegistry Modules
+
+<PageTitle>@_title — ShaunERP</PageTitle>
+<section class="page">
+    <header class="page-head">
+        <div><p class="eyebrow">Reports</p><h1>@_title</h1></div>
+        <div class="form-actions">
+            <label>From <input type="date" @bind="_from" /></label>
+            <label>To <input type="date" @bind="_to" /></label>
+            @if (_reportKey is "gl" or "cash" or "bank")
+            {
+                <label>Ledger
+                    <select @bind="_ledgerId">
+                        <option value="0">— Select —</option>
+                        @foreach (var l in _ledgers)
+                        {
+                            <option value="@l.Id">@l.LedgerName</option>
+                        }
+                    </select>
+                </label>
+            }
+            <button class="btn" @onclick="LoadAsync">Run</button>
+        </div>
+    </header>
+    @if (_error is not null) { <div class="error-state">@_error</div> }
+    else if (_loading) { <div class="loading-state">Loading…</div> }
+    else if (_tb is not null)
+    {
+        <p class="muted">Balanced: @(_tb.IsBalanced ? "Yes" : "No") · Closing Dr @_tb.TotalClosingDebit.ToString("N2") / Cr @_tb.TotalClosingCredit.ToString("N2")</p>
+        <table class="data-table">
+            <thead><tr><th>Ledger</th><th class="num">Open Dr</th><th class="num">Open Cr</th><th class="num">Period Dr</th><th class="num">Period Cr</th><th class="num">Close Dr</th><th class="num">Close Cr</th></tr></thead>
+            <tbody>
+            @foreach (var r in _tb.Rows)
+            {
+                <tr>
+                    <td>@r.LedgerName</td>
+                    <td class="num">@r.OpeningDebit.ToString("N2")</td>
+                    <td class="num">@r.OpeningCredit.ToString("N2")</td>
+                    <td class="num">@r.PeriodDebit.ToString("N2")</td>
+                    <td class="num">@r.PeriodCredit.ToString("N2")</td>
+                    <td class="num">@r.ClosingDebit.ToString("N2")</td>
+                    <td class="num">@r.ClosingCredit.ToString("N2")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+    else if (_pl is not null)
+    {
+        <div class="stat-grid"><div class="stat-card"><strong>@_pl.NetProfit.ToString("N2")</strong><span>Net profit / loss</span></div></div>
+        <h2>Income</h2>
+        <table class="data-table"><tbody>@foreach (var r in _pl.Income){<tr><td>@r.Label</td><td class="num">@r.Amount.ToString("N2")</td></tr>}</tbody></table>
+        <h2>Expenses</h2>
+        <table class="data-table"><tbody>@foreach (var r in _pl.Expenses){<tr><td>@r.Label</td><td class="num">@r.Amount.ToString("N2")</td></tr>}</tbody></table>
+    }
+    else if (_bs is not null)
+    {
+        <p class="muted">Equation balanced: @(_bs.IsBalanced ? "Yes" : "No") · Assets @_bs.TotalAssets.ToString("N2") · L+E @_bs.TotalLiabilitiesEquity.ToString("N2")</p>
+        <h2>Assets</h2>
+        <table class="data-table"><tbody>@foreach (var r in _bs.Assets){<tr><td>@r.Label</td><td class="num">@r.Amount.ToString("N2")</td></tr>}</tbody></table>
+        <h2>Liabilities</h2>
+        <table class="data-table"><tbody>@foreach (var r in _bs.Liabilities){<tr><td>@r.Label</td><td class="num">@r.Amount.ToString("N2")</td></tr>}</tbody></table>
+        <h2>Equity</h2>
+        <table class="data-table"><tbody>@foreach (var r in _bs.Equity){<tr><td>@r.Label</td><td class="num">@r.Amount.ToString("N2")</td></tr>}</tbody></table>
+    }
+    else if (_gl is not null)
+    {
+        <p class="muted">@_gl.Ledger.LedgerName · Opening @_gl.OpeningBalance.ToString("N2") · Closing @_gl.ClosingBalance.ToString("N2")</p>
+        <table class="data-table">
+            <thead><tr><th>Date</th><th>Voucher</th><th>Type</th><th>Narration</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
+            <tbody>
+            @foreach (var l in _gl.Lines)
+            {
+                <tr>
+                    <td>@l.Date.ToString("dd-MMM-yyyy")</td>
+                    <td><a href="/accounting/vouchers/@l.VoucherId">@l.VoucherNumber</a></td>
+                    <td>@l.VoucherType</td>
+                    <td>@(l.Narration ?? "")</td>
+                    <td class="num">@l.Debit.ToString("N2")</td>
+                    <td class="num">@l.Credit.ToString("N2")</td>
+                    <td class="num">@l.RunningBalance.ToString("N2")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+    else if (_day is not null)
+    {
+        <table class="data-table">
+            <thead><tr><th>Date</th><th>Voucher</th><th>Type</th><th>Account</th><th>Narration</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
+            <tbody>
+            @foreach (var r in _day)
+            {
+                <tr>
+                    <td>@r.Date.ToString("dd-MMM-yyyy")</td>
+                    <td><a href="/accounting/vouchers/@r.VoucherId">@r.VoucherNumber</a></td>
+                    <td>@r.VoucherType</td>
+                    <td>@r.Account</td>
+                    <td>@(r.Narration ?? "")</td>
+                    <td class="num">@r.Debit.ToString("N2")</td>
+                    <td class="num">@r.Credit.ToString("N2")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+    else if (_ar is not null)
+    {
+        <table class="data-table">
+            <thead><tr><th>Party</th><th>Invoice</th><th>Due</th><th>Bucket</th><th class="num">Amount</th></tr></thead>
+            <tbody>
+            @foreach (var r in _ar)
+            {
+                <tr>
+                    <td>@r.Party</td>
+                    <td>@(r.InvoiceNumber ?? "—")</td>
+                    <td>@(r.DueDate?.ToString("dd-MMM-yyyy") ?? "—")</td>
+                    <td>@r.Bucket</td>
+                    <td class="num">@r.Amount.ToString("N2")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private string _title = "Report";
+    private string _reportKey = "tb";
+    private DateTime _from = new(DateTime.UtcNow.Year, 4, 1);
+    private DateTime _to = DateTime.UtcNow.Date;
+    private int _ledgerId;
+    private List<Ledger> _ledgers = new();
+    private TrialBalanceReport? _tb;
+    private ProfitLossReport? _pl;
+    private BalanceSheetReport? _bs;
+    private GlReportDto? _gl;
+    private IReadOnlyList<DayBookRow>? _day;
+    private IReadOnlyList<OutstandingRow>? _ar;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Shell.InitializeAsync();
+        var mod = Modules.GetByKey(ModuleKeys.Accounting);
+        if (mod is null || !Modules.CanAccessModule(mod, Tenant)) { _error = "Access denied."; _loading = false; return; }
+        var path = Nav.ToBaseRelativePath(Nav.Uri).ToLowerInvariant();
+        _reportKey = path switch
+        {
+            var p when p.Contains("general-ledger") => "gl",
+            var p when p.Contains("profit-loss") => "pl",
+            var p when p.Contains("balance-sheet") => "bs",
+            var p when p.Contains("day-book") => "day",
+            var p when p.Contains("cash-book") => "cash",
+            var p when p.Contains("bank-book") => "bank",
+            var p when p.Contains("receivables") => "ar",
+            var p when p.Contains("payables") => "ap",
+            _ => "tb"
+        };
+        _title = _reportKey switch
+        {
+            "gl" => "General ledger",
+            "pl" => "Profit & loss",
+            "bs" => "Balance sheet",
+            "day" => "Day book",
+            "cash" => "Cash book",
+            "bank" => "Bank book",
+            "ar" => "Receivables",
+            "ap" => "Payables",
+            _ => "Trial balance"
+        };
+        try
+        {
+            await Accounting.EnsureBootstrapAsync();
+            if (_reportKey is "gl" or "cash" or "bank")
+                _ledgers = (await Accounting.ListLedgersAsync()).ToList();
+            await LoadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task LoadAsync()
+    {
+        _error = null; _tb = null; _pl = null; _bs = null; _gl = null; _day = null; _ar = null;
+        try
+        {
+            switch (_reportKey)
+            {
+                case "tb": _tb = await Reports.GetTrialBalanceAsync(_from, _to); break;
+                case "pl": _pl = await Reports.GetProfitAndLossAsync(_from, _to); break;
+                case "bs": _bs = await Reports.GetBalanceSheetAsync(_to); break;
+                case "gl":
+                    if (_ledgerId <= 0) { _error = "Select a ledger."; break; }
+                    _gl = await Reports.GetGeneralLedgerAsync(_ledgerId, _from, _to); break;
+                case "day": _day = await Reports.GetDayBookAsync(_from, _to); break;
+                case "cash": _day = await Reports.GetCashBookAsync(_ledgerId > 0 ? _ledgerId : null, _from, _to); break;
+                case "bank": _day = await Reports.GetBankBookAsync(_ledgerId > 0 ? _ledgerId : null, _from, _to); break;
+                case "ar": _ar = await Reports.GetReceivablesAsync(); break;
+                case "ap": _ar = await Reports.GetPayablesAsync(); break;
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+}

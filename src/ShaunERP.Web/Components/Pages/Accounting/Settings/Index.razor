@@ -1,0 +1,276 @@
+@page "/accounting/settings/company"
+@page "/accounting/settings/gst"
+@page "/accounting/settings/financial-years"
+@page "/accounting/settings"
+@page "/accounting/settings/period-lock"
+@page "/accounting/opening-balances"
+@attribute [Authorize]
+@inject IAccountingService Accounting
+@inject IAccountingPostingService Posting
+@inject NavigationManager Nav
+@inject ShellStateService Shell
+@inject ITenantContext Tenant
+@inject IModuleRegistry Modules
+
+<PageTitle>@_title — ShaunERP</PageTitle>
+<section class="page">
+    <header class="page-head"><div><p class="eyebrow">Configuration</p><h1>@_title</h1></div></header>
+    @if (_error is not null) { <div class="error-state">@_error</div> }
+    @if (_message is not null) { <div class="success-state">@_message</div> }
+    @if (_loading) { <div class="loading-state">Loading…</div> }
+    else if (_profile is not null)
+    {
+        <div class="panel form-grid">
+            <label>Legal name<input @bind="_profile.LegalName" /></label>
+            <label>Trading name<input @bind="_profile.TradingName" /></label>
+            <label>Address line 1<input @bind="_profile.AddressLine1" /></label>
+            <label>Address line 2<input @bind="_profile.AddressLine2" /></label>
+            <label>City<input @bind="_profile.City" /></label>
+            <label>State<input @bind="_profile.State" /></label>
+            <label>Country<input @bind="_profile.Country" /></label>
+            <label>Postal code<input @bind="_profile.PostalCode" /></label>
+            <label>Phone<input @bind="_profile.Phone" /></label>
+            <label>Email<input @bind="_profile.Email" /></label>
+            <label>GSTIN<input @bind="_profile.PrimaryGstin" /></label>
+            <label>PAN<input @bind="_profile.PrimaryPan" /></label>
+        </div>
+        <button class="btn" @onclick="SaveProfile">Save company profile</button>
+        <h2>Statutory registrations</h2>
+        <div class="form-grid">
+            <label>Type<input @bind="_statType" placeholder="GSTIN / PAN / TAN / CIN…" /></label>
+            <label>Number<input @bind="_statNumber" /></label>
+            <button class="btn ghost" @onclick="AddStatutory">Add</button>
+        </div>
+        <table class="data-table"><thead><tr><th>Type</th><th>Number</th><th>Active</th></tr></thead>
+            <tbody>@foreach (var s in _statutory){<tr><td>@s.RegistrationType</td><td>@s.RegistrationNumber</td><td>@(s.IsActive?"Yes":"No")</td></tr>}</tbody></table>
+    }
+    else if (_gst is not null)
+    {
+        <div class="panel form-grid">
+            <label class="checkbox"><input type="checkbox" @bind="_gst.GstRegistered" /> GST registered</label>
+            <label>GSTIN<input @bind="_gst.Gstin" /></label>
+            <label>State<input @bind="_gst.State" /></label>
+            <label>State code<input @bind="_gst.StateCode" /></label>
+            <label class="checkbox"><input type="checkbox" @bind="_gst.CompositionScheme" /> Composition scheme</label>
+            <label class="checkbox"><input type="checkbox" @bind="_gst.ReverseChargeApplicable" /> Reverse charge</label>
+        </div>
+        <button class="btn" @onclick="SaveGst">Save GST settings</button>
+        <h2>Tax rates</h2>
+        <table class="data-table"><thead><tr><th>Name</th><th>Type</th><th class="num">%</th></tr></thead>
+            <tbody>@foreach (var t in _rates){<tr><td>@t.TaxName</td><td>@t.TaxType</td><td class="num">@t.Percentage.ToString("N2")</td></tr>}</tbody></table>
+    }
+    else if (_years is not null)
+    {
+        <div class="form-grid">
+            <label>Name<input @bind="_fyName" placeholder="2026-2027" /></label>
+            <label>Start<input type="date" @bind="_fyStart" /></label>
+            <label>End<input type="date" @bind="_fyEnd" /></label>
+            <button class="btn" @onclick="CreateFy">Create year</button>
+        </div>
+        <table class="data-table"><thead><tr><th>Name</th><th>Start</th><th>End</th><th>Current</th><th>Closed</th><th></th></tr></thead>
+            <tbody>
+            @foreach (var y in _years)
+            {
+                <tr>
+                    <td>@y.Name</td>
+                    <td>@y.StartDate.ToString("dd-MMM-yyyy")</td>
+                    <td>@y.EndDate.ToString("dd-MMM-yyyy")</td>
+                    <td>@(y.IsCurrent?"Yes":"")</td>
+                    <td>@(y.IsClosed?"Yes":"")</td>
+                    <td class="form-actions">
+                        @if (!y.IsCurrent){<button class="btn ghost" @onclick="() => SetCurrent(y.Id)">Set current</button>}
+                        @if (!y.IsClosed){<button class="btn ghost" @onclick="() => CloseFy(y.Id)">Close</button>}
+                        else {<button class="btn ghost" @onclick="() => ReopenFy(y.Id)">Reopen</button>}
+                    </td>
+                </tr>
+            }
+            </tbody></table>
+    }
+    else if (_settings is not null)
+    {
+        <div class="panel form-grid">
+            <label class="checkbox"><input type="checkbox" @bind="_settings.AutoPostSalesInvoice" /> Auto-post sales invoices</label>
+            <label class="checkbox"><input type="checkbox" @bind="_settings.InventoryEnabled" /> Inventory enabled</label>
+            <label class="checkbox"><input type="checkbox" @bind="_settings.StockAccountingEnabled" /> Stock accounting enabled</label>
+            <label class="checkbox"><input type="checkbox" @bind="_settings.AutoCreateCustomerLedger" /> Auto-create customer ledgers</label>
+        </div>
+        <button class="btn" @onclick="SaveSettings">Save settings</button>
+    }
+    else if (_lockMode)
+    {
+        <div class="form-grid">
+            <label>Lock through<input type="date" @bind="_lockDate" /></label>
+            <label>Reason<input @bind="_lockReason" /></label>
+        </div>
+        <p class="muted">Current lock: @(_lock?.LockedThroughDate.ToString("dd-MMM-yyyy") ?? "None")</p>
+        <button class="btn" @onclick="SaveLock">Update period lock</button>
+    }
+    else if (_obMode)
+    {
+        <p class="muted">Enter opening balances for the current financial year start. Unequal totals are adjusted to Opening Balance Adjustment.</p>
+        <table class="data-table">
+            <thead><tr><th>Ledger</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
+            <tbody>
+            @for (var i = 0; i < _obLines.Count; i++)
+            {
+                var idx = i;
+                <tr>
+                    <td>
+                        <select @bind="_obLines[idx].LedgerId">
+                            <option value="0">—</option>
+                            @foreach (var l in _ledgers){<option value="@l.Id">@l.LedgerName</option>}
+                        </select>
+                    </td>
+                    <td class="num"><input type="number" step="0.01" @bind="_obLines[idx].Debit" /></td>
+                    <td class="num"><input type="number" step="0.01" @bind="_obLines[idx].Credit" /></td>
+                </tr>
+            }
+            </tbody>
+        </table>
+        <div class="form-actions">
+            <button class="btn ghost" @onclick="() => _obLines.Add(new ObLine())">+ Line</button>
+            <button class="btn" @onclick="PostOpening">Post opening balances</button>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private string? _message;
+    private string _title = "Settings";
+    private CompanyProfile? _profile;
+    private List<CompanyStatutoryRegistration> _statutory = new();
+    private string? _statType;
+    private string? _statNumber;
+    private CompanyGstSettings? _gst;
+    private List<GstTaxRate> _rates = new();
+    private List<FinancialYear>? _years;
+    private string _fyName = $"{DateTime.UtcNow.Year}-{DateTime.UtcNow.Year + 1}";
+    private DateTime _fyStart = new(DateTime.UtcNow.Year, 4, 1);
+    private DateTime _fyEnd = new(DateTime.UtcNow.Year + 1, 3, 31);
+    private AccountingSettings? _settings;
+    private bool _lockMode;
+    private AccountingPeriodLock? _lock;
+    private DateTime _lockDate = DateTime.UtcNow.Date;
+    private string? _lockReason;
+    private bool _obMode;
+    private List<Ledger> _ledgers = new();
+    private List<ObLine> _obLines = new() { new(), new() };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Shell.InitializeAsync();
+        var mod = Modules.GetByKey(ModuleKeys.Accounting);
+        if (mod is null || !Modules.CanAccessModule(mod, Tenant)) { _error = "Access denied."; _loading = false; return; }
+        var path = Nav.ToBaseRelativePath(Nav.Uri).ToLowerInvariant();
+        try
+        {
+            await Accounting.EnsureBootstrapAsync();
+            if (path.Contains("company"))
+            {
+                _title = "Company profile";
+                _profile = await Accounting.GetOrCreateProfileAsync();
+                _statutory = (await Accounting.ListStatutoryAsync()).ToList();
+            }
+            else if (path.Contains("gst"))
+            {
+                _title = "GST settings";
+                _gst = await Accounting.GetOrCreateGstAsync();
+                _rates = (await Accounting.ListTaxRatesAsync()).ToList();
+            }
+            else if (path.Contains("financial-years"))
+            {
+                _title = "Financial years";
+                _years = (await Accounting.ListFinancialYearsAsync()).ToList();
+            }
+            else if (path.Contains("period-lock"))
+            {
+                _title = "Period lock";
+                _lockMode = true;
+                _lock = await Accounting.GetPeriodLockAsync();
+                if (_lock is not null) _lockDate = _lock.LockedThroughDate;
+            }
+            else if (path.Contains("opening-balances"))
+            {
+                _title = "Opening balances";
+                _obMode = true;
+                _ledgers = (await Accounting.ListLedgersAsync()).ToList();
+            }
+            else
+            {
+                _title = "Accounting settings";
+                _settings = await Accounting.GetOrCreateSettingsAsync();
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task SaveProfile()
+    {
+        try { _profile = await Accounting.SaveProfileAsync(_profile!); _message = "Saved."; }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+    private async Task AddStatutory()
+    {
+        try
+        {
+            await Accounting.UpsertStatutoryAsync(new CompanyStatutoryRegistration
+            {
+                RegistrationType = _statType ?? "",
+                RegistrationNumber = _statNumber ?? "",
+                IsActive = true
+            });
+            _statutory = (await Accounting.ListStatutoryAsync()).ToList();
+            _statType = _statNumber = null;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+    private async Task SaveGst()
+    {
+        try { _gst = await Accounting.SaveGstAsync(_gst!); _message = "GST settings saved."; }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+    private async Task CreateFy()
+    {
+        try
+        {
+            await Accounting.CreateFinancialYearAsync(new FinancialYear { Name = _fyName, StartDate = _fyStart, EndDate = _fyEnd, IsCurrent = true });
+            _years = (await Accounting.ListFinancialYearsAsync()).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+    private async Task SetCurrent(int id) { await Accounting.SetCurrentFinancialYearAsync(id); _years = (await Accounting.ListFinancialYearsAsync()).ToList(); }
+    private async Task CloseFy(int id) { await Accounting.CloseFinancialYearAsync(id); _years = (await Accounting.ListFinancialYearsAsync()).ToList(); }
+    private async Task ReopenFy(int id) { await Accounting.ReopenFinancialYearAsync(id); _years = (await Accounting.ListFinancialYearsAsync()).ToList(); }
+    private async Task SaveSettings()
+    {
+        try { _settings = await Accounting.SaveSettingsAsync(_settings!); _message = "Settings saved."; }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+    private async Task SaveLock()
+    {
+        try { _lock = await Accounting.SetPeriodLockAsync(_lockDate, _lockReason); _message = "Period locked."; }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+    private async Task PostOpening()
+    {
+        try
+        {
+            var voucher = await Accounting.CreateOpeningBalancesAsync(
+                _obLines.Where(l => l.LedgerId > 0 && (l.Debit > 0 || l.Credit > 0))
+                    .Select(l => new AccountingPostingLineRequest { LedgerId = l.LedgerId, Debit = l.Debit, Credit = l.Credit })
+                    .ToList());
+            _message = $"Posted {voucher.VoucherNumber}";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private sealed class ObLine
+    {
+        public int LedgerId { get; set; }
+        public decimal Debit { get; set; }
+        public decimal Credit { get; set; }
+    }
+}

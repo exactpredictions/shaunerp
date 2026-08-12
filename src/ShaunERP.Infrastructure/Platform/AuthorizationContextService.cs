@@ -52,6 +52,8 @@ public sealed class AuthorizationContextService : IAuthorizationContextService
             entitlements.Add(ModuleKeys.Users);
             entitlements.Add(ModuleKeys.Crm);
             entitlements.Add(ModuleKeys.Finance);
+            entitlements.Add(ModuleKeys.Orders);
+            entitlements.Add(ModuleKeys.Accounting);
             entitlements.Add(ModuleKeys.Hrms);
             entitlements.Add(ModuleKeys.Projects);
             entitlements.Add(ModuleKeys.Platform);
@@ -117,6 +119,8 @@ public sealed class AuthorizationContextService : IAuthorizationContextService
             entitlements.Add(ModuleKeys.Users);
             entitlements.Add(ModuleKeys.Crm);
             entitlements.Add(ModuleKeys.Finance);
+            entitlements.Add(ModuleKeys.Orders);
+            entitlements.Add(ModuleKeys.Accounting);
             entitlements.Add(ModuleKeys.Hrms);
             entitlements.Add(ModuleKeys.Projects);
             entitlements.Add(ModuleKeys.Platform);

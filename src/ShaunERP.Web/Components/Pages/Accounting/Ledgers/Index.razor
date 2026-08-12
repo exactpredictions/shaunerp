@@ -1,0 +1,95 @@
+@page "/accounting/ledgers"
+@attribute [Authorize]
+@inject IAccountingService Accounting
+@inject ShellStateService Shell
+@inject ITenantContext Tenant
+@inject IModuleRegistry Modules
+
+<PageTitle>Chart of accounts — ShaunERP</PageTitle>
+<section class="page">
+    <header class="page-head">
+        <div><p class="eyebrow">Masters</p><h1>Chart of accounts / Ledgers</h1></div>
+        <div class="form-actions">
+            <input placeholder="Search ledgers" @bind="_search" @bind:event="oninput" />
+            <button class="btn ghost" @onclick="Reload">Search</button>
+        </div>
+    </header>
+    @if (_error is not null) { <div class="error-state">@_error</div> }
+    else if (_loading) { <div class="loading-state">Loading…</div> }
+    else
+    {
+        <div class="panel">
+            <h2>New ledger</h2>
+            <div class="form-grid">
+                <label>Code<input @bind="_new.LedgerCode" /></label>
+                <label>Name<input @bind="_new.LedgerName" /></label>
+                <label>Group
+                    <select @bind="_new.AccountGroupId">
+                        @foreach (var g in _groups)
+                        {
+                            <option value="@g.Id">@g.GroupName</option>
+                        }
+                    </select>
+                </label>
+                <label class="checkbox"><input type="checkbox" @bind="_new.IsCashLedger" /> Cash ledger</label>
+                <label class="checkbox"><input type="checkbox" @bind="_new.IsBankLedger" /> Bank ledger</label>
+            </div>
+            <button class="btn" @onclick="CreateAsync">Create ledger</button>
+        </div>
+        <table class="data-table">
+            <thead><tr><th>Code</th><th>Name</th><th>Group</th><th>Type</th><th>System</th></tr></thead>
+            <tbody>
+            @foreach (var l in _ledgers)
+            {
+                <tr>
+                    <td>@l.LedgerCode</td>
+                    <td>@l.LedgerName</td>
+                    <td>@(l.AccountGroup?.GroupName ?? "—")</td>
+                    <td>@l.AccountType</td>
+                    <td>@(l.IsSystemLedger ? "Yes" : "")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+</section>
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private string? _search;
+    private List<Ledger> _ledgers = new();
+    private List<AccountGroup> _groups = new();
+    private Ledger _new = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Shell.InitializeAsync();
+        var mod = Modules.GetByKey(ModuleKeys.Accounting);
+        if (mod is null || !Modules.CanAccessModule(mod, Tenant)) { _error = "Access denied."; _loading = false; return; }
+        try
+        {
+            await Accounting.EnsureBootstrapAsync();
+            _groups = (await Accounting.ListGroupsAsync()).ToList();
+            if (_groups.Count > 0) _new.AccountGroupId = _groups[0].Id;
+            await Reload();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task Reload()
+    {
+        _ledgers = (await Accounting.ListLedgersAsync(_search)).ToList();
+    }
+
+    private async Task CreateAsync()
+    {
+        try
+        {
+            await Accounting.UpsertLedgerAsync(_new);
+            _new = new Ledger { AccountGroupId = _groups.FirstOrDefault()?.Id ?? 0 };
+            await Reload();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+}

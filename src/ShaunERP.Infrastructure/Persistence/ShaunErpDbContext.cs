@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using ShaunERP.Core;
+using ShaunERP.Core.Accounting;
 using ShaunERP.Core.Crm;
 using ShaunERP.Core.Finance;
 using ShaunERP.Core.Hrms;
@@ -59,6 +60,26 @@ public class ShaunErpDbContext : DbContext
     public DbSet<SalesOrder> SalesOrders => Set<SalesOrder>();
     public DbSet<SalesOrderLine> SalesOrderLines => Set<SalesOrderLine>();
 
+    // Accounting
+    public DbSet<CompanyProfile> CompanyProfiles => Set<CompanyProfile>();
+    public DbSet<CompanyStatutoryRegistration> CompanyStatutoryRegistrations => Set<CompanyStatutoryRegistration>();
+    public DbSet<CompanyGstSettings> CompanyGstSettings => Set<CompanyGstSettings>();
+    public DbSet<GstTaxRate> GstTaxRates => Set<GstTaxRate>();
+    public DbSet<CurrencyMaster> Currencies => Set<CurrencyMaster>();
+    public DbSet<ExchangeRate> ExchangeRates => Set<ExchangeRate>();
+    public DbSet<FinancialYear> FinancialYears => Set<FinancialYear>();
+    public DbSet<AccountingPeriodLock> AccountingPeriodLocks => Set<AccountingPeriodLock>();
+    public DbSet<AccountingSettings> AccountingSettings => Set<AccountingSettings>();
+    public DbSet<AccountGroup> AccountGroups => Set<AccountGroup>();
+    public DbSet<Ledger> Ledgers => Set<Ledger>();
+    public DbSet<VoucherType> VoucherTypes => Set<VoucherType>();
+    public DbSet<AccountingVoucher> AccountingVouchers => Set<AccountingVoucher>();
+    public DbSet<AccountingVoucherLine> AccountingVoucherLines => Set<AccountingVoucherLine>();
+    public DbSet<AccountingAllocation> AccountingAllocations => Set<AccountingAllocation>();
+    public DbSet<InventoryItemCategory> InventoryItemCategories => Set<InventoryItemCategory>();
+    public DbSet<UnitOfMeasure> UnitsOfMeasure => Set<UnitOfMeasure>();
+    public DbSet<InventoryItem> InventoryItems => Set<InventoryItem>();
+
     // HRMS
     public DbSet<Department> Departments => Set<Department>();
     public DbSet<Employee> Employees => Set<Employee>();
@@ -97,7 +118,6 @@ public class ShaunErpDbContext : DbContext
         modelBuilder.Entity<CompanyModule>()
             .HasIndex(x => new { x.CompanyId, x.ModuleKey });
 
-        // Existing production schema uses "Customers" (not the DbSet name CrmCustomers).
         modelBuilder.Entity<Customer>().ToTable("Customers");
         modelBuilder.Entity<ShaunERP.Core.Crm.Account>().ToTable("CrmAccounts");
 
@@ -178,6 +198,8 @@ public class ShaunErpDbContext : DbContext
 
         modelBuilder.Entity<InvoiceLine>()
             .Ignore(x => x.LineNet);
+
+        ConfigureAccounting(modelBuilder);
 
         modelBuilder.Entity<Lead>()
             .Property(x => x.AnnualRevenue)
@@ -305,6 +327,97 @@ public class ShaunErpDbContext : DbContext
             decimalProp.SetPrecision(18);
             decimalProp.SetScale(2);
         }
+    }
+
+    private static void ConfigureAccounting(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<CompanyProfile>()
+            .HasIndex(x => x.CompanyId)
+            .IsUnique();
+
+        modelBuilder.Entity<CompanyGstSettings>()
+            .HasIndex(x => x.CompanyId)
+            .IsUnique();
+
+        modelBuilder.Entity<AccountingSettings>()
+            .HasIndex(x => x.CompanyId)
+            .IsUnique();
+
+        modelBuilder.Entity<CurrencyMaster>()
+            .HasIndex(x => new { x.CompanyId, x.CurrencyCode })
+            .IsUnique();
+
+        modelBuilder.Entity<FinancialYear>()
+            .HasIndex(x => new { x.CompanyId, x.Name })
+            .IsUnique();
+
+        modelBuilder.Entity<AccountGroup>()
+            .HasIndex(x => new { x.CompanyId, x.GroupCode })
+            .IsUnique();
+
+        modelBuilder.Entity<AccountGroup>()
+            .HasOne(x => x.ParentGroup)
+            .WithMany(x => x.Children)
+            .HasForeignKey(x => x.ParentGroupId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Ledger>()
+            .HasIndex(x => new { x.CompanyId, x.LedgerCode })
+            .IsUnique();
+
+        modelBuilder.Entity<Ledger>()
+            .HasIndex(x => new { x.CompanyId, x.SystemCode });
+
+        modelBuilder.Entity<Ledger>()
+            .HasOne(x => x.AccountGroup)
+            .WithMany(x => x.Ledgers)
+            .HasForeignKey(x => x.AccountGroupId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<VoucherType>()
+            .HasIndex(x => new { x.CompanyId, x.Code })
+            .IsUnique();
+
+        modelBuilder.Entity<AccountingVoucher>()
+            .HasIndex(x => new { x.CompanyId, x.VoucherNumber })
+            .IsUnique();
+
+        modelBuilder.Entity<AccountingVoucher>()
+            .HasIndex(x => new { x.CompanyId, x.SourceModule, x.SourceEntityType, x.SourceEntityId, x.PostingType });
+
+        modelBuilder.Entity<AccountingVoucher>()
+            .HasIndex(x => new { x.CompanyId, x.VoucherDate });
+
+        modelBuilder.Entity<AccountingVoucher>()
+            .HasIndex(x => new { x.CompanyId, x.FinancialYearId });
+
+        modelBuilder.Entity<AccountingVoucher>()
+            .HasMany(x => x.Lines)
+            .WithOne(x => x.Voucher!)
+            .HasForeignKey(x => x.VoucherId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<AccountingVoucher>()
+            .HasOne(x => x.ReversalOfVoucher)
+            .WithMany()
+            .HasForeignKey(x => x.ReversalOfVoucherId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<AccountingVoucherLine>()
+            .HasIndex(x => new { x.CompanyId, x.LedgerId });
+
+        modelBuilder.Entity<AccountingVoucherLine>()
+            .HasOne(x => x.Ledger)
+            .WithMany()
+            .HasForeignKey(x => x.LedgerId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<GstTaxRate>()
+            .HasIndex(x => new { x.CompanyId, x.TaxName, x.TaxType });
+
+        modelBuilder.Entity<InventoryItem>()
+            .HasIndex(x => new { x.CompanyId, x.ItemCode })
+            .IsUnique();
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)

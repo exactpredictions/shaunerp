@@ -82,6 +82,7 @@ public class AuthService : IAuthService
                 CreateModule(company.Id, ModuleKeys.Crm, "CRM"),
                 CreateModule(company.Id, ModuleKeys.Finance, "Finance"),
                 CreateModule(company.Id, ModuleKeys.Orders, "Sales Orders"),
+                CreateModule(company.Id, ModuleKeys.Accounting, "Accounting"),
                 CreateModule(company.Id, ModuleKeys.Hrms, "HRMS"),
                 CreateModule(company.Id, ModuleKeys.Projects, "Projects"),
                 CreateModule(company.Id, ModuleKeys.Users, "Users"));

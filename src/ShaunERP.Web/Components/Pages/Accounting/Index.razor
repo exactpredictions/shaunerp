@@ -1,0 +1,108 @@
+@page "/accounting"
+@attribute [Authorize]
+@inject IAccountingService Accounting
+@inject ITenantContext Tenant
+@inject IModuleRegistry Modules
+@inject ShellStateService Shell
+
+<PageTitle>Accounting — ShaunERP</PageTitle>
+
+<section class="page">
+    <div class="breadcrumbs"><a href="/">Home</a><span class="sep">/</span><span>Accounting</span></div>
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">Books · Double entry</p>
+            <h1>Accounting workspace</h1>
+            <p class="muted">Financial backbone for @(Tenant.CompanyName ?? "your account").</p>
+        </div>
+        <div class="form-actions">
+            <a class="btn ghost" href="/accounting/vouchers/journal">New journal</a>
+            <a class="btn" href="/accounting/vouchers/receipt">New receipt</a>
+        </div>
+    </header>
+
+    @if (!_allowed)
+    {
+        <div class="error-state">Accounting is not licensed for this account or you lack permission.</div>
+    }
+    else if (_loading)
+    {
+        <div class="loading-state">Loading accounting dashboard…</div>
+    }
+    else if (_error is not null)
+    {
+        <div class="error-state">@_error</div>
+    }
+    else if (_stats is not null)
+    {
+        <div class="stat-grid crm-stats">
+            <div class="stat-card"><strong>@_stats.CashBalance.ToString("N2")</strong><span>Cash</span></div>
+            <div class="stat-card"><strong>@_stats.BankBalance.ToString("N2")</strong><span>Bank</span></div>
+            <div class="stat-card"><strong>@_stats.Receivables.ToString("N2")</strong><span>Receivables</span></div>
+            <div class="stat-card"><strong>@_stats.Payables.ToString("N2")</strong><span>Payables</span></div>
+            <div class="stat-card"><strong>@_stats.SalesMonth.ToString("N2")</strong><span>Sales (month)</span></div>
+            <div class="stat-card"><strong>@_stats.ExpensesMonth.ToString("N2")</strong><span>Expenses (month)</span></div>
+            <div class="stat-card"><strong>@_stats.ProfitMonth.ToString("N2")</strong><span>P/L (month)</span></div>
+            <a class="stat-card" href="/accounting/vouchers"><strong>@_stats.DraftVouchers</strong><span>Draft vouchers</span></a>
+        </div>
+
+        <div class="form-actions" style="margin:1.25rem 0">
+            <a class="btn ghost" href="/accounting/vouchers/payment">Payment</a>
+            <a class="btn ghost" href="/accounting/vouchers/contra">Contra</a>
+            <a class="btn ghost" href="/accounting/ledgers">Chart of accounts</a>
+            <a class="btn ghost" href="/accounting/reports/trial-balance">Trial balance</a>
+            <a class="btn ghost" href="/accounting/reports/profit-loss">Profit &amp; loss</a>
+            <a class="btn ghost" href="/accounting/reports/balance-sheet">Balance sheet</a>
+            <a class="btn ghost" href="/accounting/settings/company">Company profile</a>
+            <a class="btn ghost" href="/accounting/settings/financial-years">Financial years</a>
+        </div>
+
+        <div class="panel">
+            <h2>Recent vouchers</h2>
+            @if (_stats.RecentVouchers.Count == 0)
+            {
+                <p class="muted">No vouchers yet. Post a journal or finalize an invoice.</p>
+            }
+            else
+            {
+                <table class="data-table">
+                    <thead><tr><th>Date</th><th>Number</th><th>Type</th><th>Status</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
+                    <tbody>
+                    @foreach (var v in _stats.RecentVouchers)
+                    {
+                        <tr>
+                            <td>@v.VoucherDate.ToString("dd-MMM-yyyy")</td>
+                            <td><a href="/accounting/vouchers/@v.Id">@v.VoucherNumber</a></td>
+                            <td>@(v.VoucherType?.Name ?? "—")</td>
+                            <td>@v.VoucherStatus</td>
+                            <td class="num">@v.TotalDebit.ToString("N2")</td>
+                            <td class="num">@v.TotalCredit.ToString("N2")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private bool _allowed;
+    private string? _error;
+    private AccountingDashboardStats? _stats;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Shell.InitializeAsync();
+        var mod = Modules.GetByKey(ModuleKeys.Accounting);
+        _allowed = mod is not null && Modules.CanAccessModule(mod, Tenant);
+        if (!_allowed) { _loading = false; return; }
+        try
+        {
+            _stats = await Accounting.GetDashboardAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+}

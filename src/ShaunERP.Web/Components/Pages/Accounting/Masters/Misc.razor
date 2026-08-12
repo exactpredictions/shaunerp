@@ -1,0 +1,69 @@
+@page "/accounting/voucher-types"
+@page "/accounting/currencies"
+@attribute [Authorize]
+@inject IAccountingService Accounting
+@inject NavigationManager Nav
+@inject ShellStateService Shell
+@inject ITenantContext Tenant
+@inject IModuleRegistry Modules
+
+<PageTitle>Accounting masters — ShaunERP</PageTitle>
+<section class="page">
+    <header class="page-head"><div><p class="eyebrow">Masters</p><h1>@_title</h1></div></header>
+    @if (_error is not null) { <div class="error-state">@_error</div> }
+    else if (_loading) { <div class="loading-state">Loading…</div> }
+    else if (_currencies is not null)
+    {
+        <table class="data-table">
+            <thead><tr><th>Code</th><th>Name</th><th>Symbol</th><th>Base</th></tr></thead>
+            <tbody>
+            @foreach (var c in _currencies)
+            {
+                <tr><td>@c.CurrencyCode</td><td>@c.CurrencyName</td><td>@c.Symbol</td><td>@(c.IsBaseCurrency ? "Yes" : "")</td></tr>
+            }
+            </tbody>
+        </table>
+    }
+    else if (_types is not null)
+    {
+        <table class="data-table">
+            <thead><tr><th>Code</th><th>Name</th><th>Prefix</th><th>Next #</th></tr></thead>
+            <tbody>
+            @foreach (var t in _types)
+            {
+                <tr><td>@t.Code</td><td>@t.Name</td><td>@t.Prefix</td><td>@(t.CurrentSequence + 1)</td></tr>
+            }
+            </tbody>
+        </table>
+    }
+</section>
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private string _title = "Masters";
+    private List<CurrencyMaster>? _currencies;
+    private List<VoucherType>? _types;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Shell.InitializeAsync();
+        var mod = Modules.GetByKey(ModuleKeys.Accounting);
+        if (mod is null || !Modules.CanAccessModule(mod, Tenant)) { _error = "Access denied."; _loading = false; return; }
+        try
+        {
+            await Accounting.EnsureBootstrapAsync();
+            if (Nav.Uri.Contains("/currencies", StringComparison.OrdinalIgnoreCase))
+            {
+                _title = "Currencies";
+                _currencies = (await Accounting.ListCurrenciesAsync()).ToList();
+            }
+            else
+            {
+                _title = "Voucher types";
+                _types = (await Accounting.ListVoucherTypesAsync()).ToList();
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+}

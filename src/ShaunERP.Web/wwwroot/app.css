@@ -602,6 +602,13 @@ textarea { resize: vertical; }
 .invoice-actions { margin-top: 1.1rem; }
 .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .invoice-payment-panel { margin-top: .25rem; max-width: 1180px; }
+.data-table .num, .num { text-align: right; font-variant-numeric: tabular-nums; }
+.success-state { padding: .85rem 1rem; border-radius: 10px; background: #e8f7ee; color: #146c2e; margin-bottom: 1rem; }
+.text-danger { color: #b42318; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem 1rem; margin-bottom: 1rem; }
+.form-grid .span-2 { grid-column: span 2; }
+.form-grid label.checkbox { display: flex; align-items: center; gap: .5rem; }
+.panel { background: var(--surface, #fff); border: 1px solid var(--line, #e5e7eb); border-radius: 12px; padding: 1rem 1.1rem; margin-bottom: 1rem; }
 
 @media (max-width: 900px) {
   .invoice-header-grid { grid-template-columns: 1fr 1fr; }

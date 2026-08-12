@@ -158,6 +158,60 @@ public static class ModuleCatalog
         },
         new ModuleDefinition
         {
+            Key = ModuleKeys.Accounting,
+            Name = "Accounting",
+            Description = "Double-entry books: chart of accounts, vouchers, GST, and financial reports",
+            Category = ModuleCategory.Finance,
+            BaseRoute = "/accounting",
+            DashboardRoute = "/accounting",
+            Icon = "accounting",
+            RequiredEntitlement = ModuleKeys.Accounting,
+            RequiredPermission = Permissions.AccountingAccess,
+            DisplayOrder = 38,
+            IsPlaceholder = false,
+            IsEnabled = true,
+            Dependencies = [ModuleKeys.Finance],
+            Permissions =
+            [
+                Permissions.AccountingAccess, Permissions.AccountingView,
+                Permissions.AccountingLedgersView, Permissions.AccountingLedgersCreate, Permissions.AccountingLedgersEdit,
+                Permissions.AccountingVouchersView, Permissions.AccountingVouchersCreate,
+                Permissions.AccountingVouchersPost, Permissions.AccountingVouchersReverse,
+                Permissions.AccountingReportsView, Permissions.AccountingSettingsManage,
+                Permissions.AccountingFinancialYearManage, Permissions.AccountingPeriodLockManage,
+                Permissions.CompanySettingsView, Permissions.CompanySettingsEdit, Permissions.GstSettingsManage
+            ],
+            NavigationItems =
+            [
+                new ModuleNavItem { Key = "accounting.dashboard", Title = "Accounting dashboard", Route = "/accounting", Icon = "dashboard", RequiredPermission = Permissions.AccountingView, Group = "Overview", Order = 1 },
+                new ModuleNavItem { Key = "accounting.journal", Title = "Journal", Route = "/accounting/vouchers/journal", Icon = "journal", RequiredPermission = Permissions.AccountingVouchersCreate, Group = "Transactions", Order = 2 },
+                new ModuleNavItem { Key = "accounting.receipt", Title = "Receipt", Route = "/accounting/vouchers/receipt", Icon = "receipt", RequiredPermission = Permissions.AccountingVouchersCreate, Group = "Transactions", Order = 3 },
+                new ModuleNavItem { Key = "accounting.payment", Title = "Payment", Route = "/accounting/vouchers/payment", Icon = "payment", RequiredPermission = Permissions.AccountingVouchersCreate, Group = "Transactions", Order = 4 },
+                new ModuleNavItem { Key = "accounting.contra", Title = "Contra", Route = "/accounting/vouchers/contra", Icon = "contra", RequiredPermission = Permissions.AccountingVouchersCreate, Group = "Transactions", Order = 5 },
+                new ModuleNavItem { Key = "accounting.vouchers", Title = "All vouchers", Route = "/accounting/vouchers", Icon = "vouchers", RequiredPermission = Permissions.AccountingVouchersView, Group = "Transactions", Order = 6 },
+                new ModuleNavItem { Key = "accounting.coa", Title = "Chart of accounts", Route = "/accounting/ledgers", Icon = "coa", RequiredPermission = Permissions.AccountingLedgersView, Group = "Masters", Order = 7 },
+                new ModuleNavItem { Key = "accounting.groups", Title = "Account groups", Route = "/accounting/groups", Icon = "groups", RequiredPermission = Permissions.AccountingLedgersView, Group = "Masters", Order = 8 },
+                new ModuleNavItem { Key = "accounting.voucher-types", Title = "Voucher types", Route = "/accounting/voucher-types", Icon = "types", RequiredPermission = Permissions.AccountingSettingsManage, Group = "Masters", Order = 9 },
+                new ModuleNavItem { Key = "accounting.currencies", Title = "Currencies", Route = "/accounting/currencies", Icon = "currency", RequiredPermission = Permissions.AccountingSettingsManage, Group = "Masters", Order = 10 },
+                new ModuleNavItem { Key = "accounting.gl", Title = "General ledger", Route = "/accounting/reports/general-ledger", Icon = "gl", RequiredPermission = Permissions.AccountingReportsView, Group = "Reports", Order = 11 },
+                new ModuleNavItem { Key = "accounting.tb", Title = "Trial balance", Route = "/accounting/reports/trial-balance", Icon = "tb", RequiredPermission = Permissions.AccountingReportsView, Group = "Reports", Order = 12 },
+                new ModuleNavItem { Key = "accounting.pl", Title = "Profit & loss", Route = "/accounting/reports/profit-loss", Icon = "pl", RequiredPermission = Permissions.AccountingReportsView, Group = "Reports", Order = 13 },
+                new ModuleNavItem { Key = "accounting.bs", Title = "Balance sheet", Route = "/accounting/reports/balance-sheet", Icon = "bs", RequiredPermission = Permissions.AccountingReportsView, Group = "Reports", Order = 14 },
+                new ModuleNavItem { Key = "accounting.daybook", Title = "Day book", Route = "/accounting/reports/day-book", Icon = "day", RequiredPermission = Permissions.AccountingReportsView, Group = "Reports", Order = 15 },
+                new ModuleNavItem { Key = "accounting.cashbook", Title = "Cash book", Route = "/accounting/reports/cash-book", Icon = "cash", RequiredPermission = Permissions.AccountingReportsView, Group = "Reports", Order = 16 },
+                new ModuleNavItem { Key = "accounting.bankbook", Title = "Bank book", Route = "/accounting/reports/bank-book", Icon = "bank", RequiredPermission = Permissions.AccountingReportsView, Group = "Reports", Order = 17 },
+                new ModuleNavItem { Key = "accounting.ar", Title = "Receivables", Route = "/accounting/reports/receivables", Icon = "ar", RequiredPermission = Permissions.AccountingReportsView, Group = "Reports", Order = 18 },
+                new ModuleNavItem { Key = "accounting.ap", Title = "Payables", Route = "/accounting/reports/payables", Icon = "ap", RequiredPermission = Permissions.AccountingReportsView, Group = "Reports", Order = 19 },
+                new ModuleNavItem { Key = "accounting.company", Title = "Company profile", Route = "/accounting/settings/company", Icon = "company", RequiredPermission = Permissions.CompanySettingsView, Group = "Configuration", Order = 20 },
+                new ModuleNavItem { Key = "accounting.gst", Title = "GST settings", Route = "/accounting/settings/gst", Icon = "gst", RequiredPermission = Permissions.GstSettingsManage, Group = "Configuration", Order = 21 },
+                new ModuleNavItem { Key = "accounting.fy", Title = "Financial years", Route = "/accounting/settings/financial-years", Icon = "fy", RequiredPermission = Permissions.AccountingFinancialYearManage, Group = "Configuration", Order = 22 },
+                new ModuleNavItem { Key = "accounting.settings", Title = "Accounting settings", Route = "/accounting/settings", Icon = "settings", RequiredPermission = Permissions.AccountingSettingsManage, Group = "Configuration", Order = 23 },
+                new ModuleNavItem { Key = "accounting.lock", Title = "Period lock", Route = "/accounting/settings/period-lock", Icon = "lock", RequiredPermission = Permissions.AccountingPeriodLockManage, Group = "Configuration", Order = 24 },
+                new ModuleNavItem { Key = "accounting.ob", Title = "Opening balances", Route = "/accounting/opening-balances", Icon = "ob", RequiredPermission = Permissions.AccountingVouchersCreate, Group = "Configuration", Order = 25 }
+            ]
+        },
+        new ModuleDefinition
+        {
             Key = ModuleKeys.Hrms,
             Name = "HRMS",
             Description = "Employees, leave, and people operations",

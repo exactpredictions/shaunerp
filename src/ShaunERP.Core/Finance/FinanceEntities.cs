@@ -85,6 +85,9 @@ public class Invoice : BaseEntity
     public int? SalesOrderId { get; set; }
     public ShaunERP.Core.Sales.SalesOrder? SalesOrder { get; set; }
 
+    /// <summary>Posted accounting voucher for this invoice (idempotent sales posting).</summary>
+    public int? AccountingVoucherId { get; set; }
+
     /// <summary>Optional legacy finance customer (nullable for CRM-first invoicing).</summary>
     public int? FinanceCustomerId { get; set; }
     public FinanceCustomer? FinanceCustomer { get; set; }
