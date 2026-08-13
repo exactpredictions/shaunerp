@@ -8,6 +8,7 @@
 @inject ShellStateService Shell
 @inject ITenantContext Tenant
 @inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthStateProvider
 
 <div class="app-shell @(Shell.SidebarCollapsed ? "collapsed" : null)">
     <header class="app-header">
@@ -26,9 +27,9 @@
         <AuthorizeView>
             <Authorized>
                 <div class="menu-wrap">
-                    <button type="button" class="header-chip" @onclick="ToggleAccountMenu" aria-haspopup="true" aria-expanded="@_accountOpen">
-                        <span>@(Tenant.CompanyName ?? "No account")</span>
-                        <span class="muted">Account</span>
+                    <button type="button" class="header-chip header-chip-account" @onclick="ToggleAccountMenu" aria-haspopup="true" aria-expanded="@_accountOpen">
+                        <CompanyNameDisplay Name="@Tenant.CompanyName" CssClass="header-company-name" />
+                        <span class="muted header-chip-label">Account</span>
                     </button>
                     @if (_accountOpen)
                     {
@@ -54,19 +55,19 @@
                     }
                 </div>
 
-                <button type="button" class="header-chip" @onclick="ToggleModuleSwitcher" aria-haspopup="dialog">
-                    <span>@(Shell.CurrentModule?.Name ?? "Modules")</span>
-                    <span class="muted">Switch</span>
+                <button type="button" class="header-chip header-chip-module" @onclick="ToggleModuleSwitcher" aria-haspopup="dialog">
+                    <span class="header-module-name" title="@(Shell.CurrentModule?.Name ?? "Modules")">@(Shell.CurrentModule?.Name ?? "Modules")</span>
+                    <span class="muted header-chip-label">Switch</span>
                 </button>
 
                 <div class="header-actions">
-                    <button type="button" class="ghost-btn" title="Search coming soon" disabled>Search</button>
-                    <button type="button" class="icon-btn" title="Notifications" disabled aria-label="Notifications">🔔</button>
+                    <button type="button" class="ghost-btn header-desktop-only" title="Search coming soon" disabled>Search</button>
+                    <button type="button" class="icon-btn header-desktop-only" title="Notifications" disabled aria-label="Notifications">🔔</button>
                     <a class="icon-btn" href="https://shauninfomedia.com/" target="_blank" rel="noopener" title="Help" aria-label="Help">?</a>
                     <div class="menu-wrap">
-                        <button type="button" class="header-chip" @onclick="ToggleUserMenu">
-                            <span>@context.User.Identity?.Name</span>
-                            <span class="muted">Profile</span>
+                        <button type="button" class="header-chip header-chip-user" @onclick="ToggleUserMenu">
+                            <span class="header-user-name" title="@context.User.Identity?.Name">@context.User.Identity?.Name</span>
+                            <span class="muted header-chip-label">Profile</span>
                         </button>
                         @if (_userOpen)
                         {
@@ -221,6 +222,15 @@
     protected override async Task OnInitializedAsync()
     {
         Shell.Changed += OnShellChanged;
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (auth.User.Identity?.IsAuthenticated == true
+            && auth.User.HasClaim("must_change_password", "true")
+            && !Nav.Uri.Contains("/account/change-password", StringComparison.OrdinalIgnoreCase))
+        {
+            Nav.NavigateTo("/account/change-password", forceLoad: true);
+            return;
+        }
+
         await Shell.InitializeAsync();
     }
 

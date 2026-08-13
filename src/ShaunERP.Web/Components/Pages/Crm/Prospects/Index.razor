@@ -13,6 +13,8 @@
         <a class="btn" href="/crm/prospects/new">Add prospect</a>
     </header>
 
+    <ImportExportPanel EntityKey="prospects" />
+
     @if (_loading) { <p class="muted">Loading…</p> }
     else if (_items.Count == 0) { <p class="muted">No prospects yet.</p> }
     else

@@ -14,6 +14,9 @@
             <button class="btn ghost" @onclick="Reload">Search</button>
         </div>
     </header>
+
+    <ImportExportPanel EntityKey="ledgers" />
+
     @if (_error is not null) { <div class="error-state">@_error</div> }
     else if (_loading) { <div class="loading-state">Loading…</div> }
     else

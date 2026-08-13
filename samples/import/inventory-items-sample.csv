@@ -1,0 +1,3 @@
+ItemCode,Name,Unit,OpeningQty,ReorderLevel,Tags 
+SAMPLE-SKU-001,SAMPLE Laptop Stand,NOS,10,2,sample 
+SAMPLE-SKU-002,SAMPLE HDMI Cable,NOS,50,10,sample 

@@ -10,13 +10,27 @@ namespace ShaunERP.Api.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly IAuthService _auth;
+    private readonly IHostEnvironment _env;
+    private readonly IConfiguration _config;
 
-    public AuthController(IAuthService auth) => _auth = auth;
+    public AuthController(IAuthService auth, IHostEnvironment env, IConfiguration config)
+    {
+        _auth = auth;
+        _env = env;
+        _config = config;
+    }
 
     [HttpPost("register")]
     [AllowAnonymous]
     public async Task<IActionResult> Register([FromBody] RegisterRequest request, CancellationToken ct)
     {
+        var allowRegister = _env.IsDevelopment()
+            || string.Equals(_config["ALLOW_PUBLIC_REGISTER"], "true", StringComparison.OrdinalIgnoreCase);
+        if (!allowRegister)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = "Public registration is disabled in this environment." });
+        }
+
         var result = await _auth.RegisterAsync(request, ct);
         if (!result.Success)
         {

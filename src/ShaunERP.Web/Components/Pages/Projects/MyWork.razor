@@ -1,0 +1,149 @@
+@page "/projects/my-work"
+@attribute [Authorize]
+@inject IProjectManagementService Projects
+
+<PageTitle>My work — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">Project Management</p>
+            <h1>My work</h1>
+            <p class="muted">Everything assigned to you, grouped by urgency.</p>
+        </div>
+        <div class="inline-actions">
+            <a class="btn ghost" href="/projects/tasks">All tasks</a>
+            <a class="btn ghost" href="/projects/timesheets">Timesheets</a>
+        </div>
+    </header>
+
+    @if (_error is not null) { <div class="alert">@_error</div> }
+
+    @if (_timer is not null)
+    {
+        <div class="ok-msg">
+            Timer running since @_timer.StartedAt.ToLocalTime().ToString("HH:mm") on
+            @(_timer.Task?.Name ?? _timer.Project?.Name ?? "current work")
+            <button class="btn ghost" type="button" style="margin-left:.75rem" @onclick="StopTimerAsync" disabled="@_busy">Stop timer</button>
+        </div>
+    }
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (_board is not null)
+    {
+        <div class="stack">
+            @RenderGroup("Overdue", _board.Overdue, true)
+            @RenderGroup("Due today", _board.Today, false)
+            @RenderGroup("In progress", _board.InProgress, false)
+            @RenderGroup("Blocked", _board.Blocked, false)
+            @RenderGroup("Upcoming", _board.Upcoming, false)
+            @RenderGroup("Completed recently", _board.CompletedRecently, false)
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true, _busy;
+    private string? _error;
+    private MyWorkBoard? _board;
+    private ProjectTimeTracker? _timer;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            _board = await Projects.MyWorkAsync();
+            _timer = await Projects.GetActiveTimerAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task StartTimerAsync(int projectId, int taskId)
+    {
+        _busy = true; _error = null;
+        try
+        {
+            _timer = await Projects.StartTimerAsync(projectId, taskId);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task StopTimerAsync()
+    {
+        _busy = true; _error = null;
+        try
+        {
+            await Projects.StopTimerAsync();
+            _timer = null;
+            await LoadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task MoveAsync(int taskId, string? rawStatus)
+    {
+        if (!Enum.TryParse<ProjectTaskStatus>(rawStatus, out var status)) return;
+        _busy = true; _error = null;
+        try
+        {
+            await Projects.UpdateTaskStatusAsync(taskId, status);
+            await LoadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private RenderFragment RenderGroup(string title, IReadOnlyList<ProjectTask> tasks, bool danger) => __builder =>
+    {
+        <div class="panel">
+            <h2>@title <span class="muted">(@tasks.Count)</span></h2>
+            @if (tasks.Count == 0)
+            {
+                <p class="muted">Nothing here.</p>
+            }
+            else
+            {
+                <div class="table-wrap"><table class="data-table">
+                    <thead>
+                        <tr><th>Task</th><th>Name</th><th>Project</th><th>Due</th><th>Priority</th><th>Status</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var t in tasks)
+                    {
+                        var current = t;
+                        <tr>
+                            <td class="mono">@current.TaskNumber</td>
+                            <td>@current.Name</td>
+                            <td><a href="@($"/projects/{current.ProjectId}/workspace")">@(current.Project?.Name ?? $"#{current.ProjectId}")</a></td>
+                            <td class="@(danger ? "text-danger" : "")">@ProjectDisplay.Date(current.DueDate)</td>
+                            <td><span class="pill @ProjectDisplay.PriorityClass(current.Priority)">@current.Priority</span></td>
+                            <td>
+                                <select value="@current.TaskStatus" disabled="@_busy"
+                                        @onchange="e => MoveAsync(current.Id, e.Value?.ToString())">
+                                    @foreach (var s in ProjectDisplay.KanbanColumns)
+                                    {
+                                        <option value="@s">@ProjectDisplay.Label(s)</option>
+                                    }
+                                </select>
+                            </td>
+                            <td>
+                                @if (_timer is null)
+                                {
+                                    <button class="btn ghost" type="button" disabled="@_busy"
+                                            @onclick="() => StartTimerAsync(current.ProjectId, current.Id)">Start timer</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table></div>
+            }
+        </div>
+    };
+}

@@ -4,6 +4,7 @@
 @using System.Globalization
 @using ShaunERP.Core.Sales
 @inject ISalesOrderService Orders
+@inject IProjectManagementService ProjectManagement
 @inject NavigationManager Nav
 
 <PageTitle>@(_isNew ? "New sales order" : "Edit sales order") — ShaunERP</PageTitle>
@@ -231,6 +232,11 @@
                     @if (!_isNew && _model.OrderStatus is SalesOrderStatus.Confirmed or SalesOrderStatus.Fulfilled or SalesOrderStatus.PartiallyInvoiced)
                     {
                         <button class="btn ghost" type="button" disabled="@_saving" @onclick="CreateInvoiceAsync">Create invoice</button>
+                    }
+                    @if (!_isNew && _model.OrderStatus is SalesOrderStatus.Confirmed or SalesOrderStatus.Fulfilled
+                         or SalesOrderStatus.PartiallyInvoiced or SalesOrderStatus.Invoiced)
+                    {
+                        <button class="btn ghost" type="button" disabled="@_saving" @onclick="CreateProjectAsync">Create project</button>
                     }
                     @if (!_isNew && _model.OrderStatus is not SalesOrderStatus.Cancelled and not SalesOrderStatus.Invoiced)
                     {
@@ -536,6 +542,15 @@
             if (refreshed is not null) ApplyLoaded(refreshed);
             _ok = $"Invoice {invoice.InvoiceNumber} created.";
             Nav.NavigateTo($"/finance/invoices/{invoice.Id}");
+        });
+    }
+
+    private async Task CreateProjectAsync()
+    {
+        await RunAction(async () =>
+        {
+            var project = await ProjectManagement.CreateProjectFromSalesOrderAsync(Id);
+            Nav.NavigateTo($"/projects/{project.Id}/workspace");
         });
     }
 

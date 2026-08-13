@@ -1,0 +1,236 @@
+# India company production template (YAML)
+# Equivalent to india-company-production-template.json
+# Leave statutory fields blank until real values are confirmed.
+# Never store passwords or JWT secrets here.
+
+schemaVersion: "1.0"
+locale: en-IN
+country: India
+
+identity:
+  legalName: Shaun Infomedia OPC Private Limited
+  tradingName: Shaun Infomedia
+  companyType: OPC Private Limited
+  domain: shauninfomedia.com
+  description: Production company shell — fill statutory fields before go-live
+  dateOfIncorporation: null
+  addressLine1: ""
+  addressLine2: ""
+  city: ""
+  district: ""
+  state: ""
+  stateCode: ""
+  country: India
+  postalCode: ""
+  corporateAddressLine1: ""
+  corporateAddressLine2: ""
+  corporateCity: ""
+  corporateState: ""
+  corporatePostalCode: ""
+  phone: ""
+  mobile: ""
+  email: ""
+  website: https://shauninfomedia.com
+  primaryGstin: ""
+  primaryPan: ""
+  tan: ""
+  cin: ""
+  udyamMsmeNumber: ""
+  iec: ""
+  logoUrl: null
+
+financial:
+  baseCurrency: INR
+  currencySymbol: "₹"
+  decimalPlaces: 2
+  financialYearLabel: ""
+  financialYearStart: null
+  financialYearEnd: null
+  booksBeginningDate: null
+  accountingMethod: Accrual
+  defaultTaxRegime: GST
+  roundingMethod: Nearest
+  booksName: Shaun Infomedia
+  booksLegalName: Shaun Infomedia OPC Private Limited
+  taxId: ""
+  defaultPaymentTerms: Net 30
+
+gst:
+  gstRegistered: false
+  gstin: ""
+  registrationType: Unregistered
+  state: ""
+  stateCode: ""
+  placeOfSupplyDefault: ""
+  compositionScheme: false
+  reverseChargeApplicable: false
+  defaultTaxBehaviour: Exclusive
+  gstEffectiveDate: null
+  enableCgst: true
+  enableSgst: true
+  enableIgst: true
+  enableUtgst: false
+  enableCess: false
+  enableHsn: true
+  enableSac: true
+  enableTds: false
+  enableTcs: false
+  enableEInvoice: false
+  enableEWayBill: false
+  taxRates: []
+
+banking:
+  primaryBankName: ""
+  branch: ""
+  primaryAccountHolder: ""
+  primaryAccountNumber: ""
+  accountType: Current
+  primaryIfsc: ""
+  swift: ""
+  upiId: ""
+  isDefaultBank: true
+  defaultCashLedgerCode: CASH
+  defaultBankLedgerCode: BANK
+
+invoice:
+  invoiceNumberPrefix: INV-
+  nextInvoiceSequence: 1001
+  financialYearReset: true
+  gstInvoiceEnabled: true
+  nonGstInvoiceEnabled: true
+  quotationPrefix: QT-
+  salesOrderPrefix: SO-
+  deliveryChallanPrefix: DC-
+  creditNotePrefix: CN-
+  debitNotePrefix: DN-
+  purchaseOrderPrefix: PO-
+  orderNumberPrefix: SO-
+  nextOrderSequence: 1001
+  defaultPaymentTerms: Net 30
+  defaultDueDays: 30
+  footer: ""
+  terms: ""
+  authorizedSignatory: ""
+  logoUrl: null
+  billingStreet: ""
+  billingCity: ""
+  billingState: ""
+  billingZip: ""
+  billingCountry: India
+  billingEmail: ""
+  billingPhone: ""
+
+crmLookups:
+  leadSources: [Website, Referral, Cold call, Partner, Advertisement]
+  leadStatuses: [New, Contacted, Qualified, Lost]
+  opportunityStages: [Qualification, Needs Analysis, Proposal, Negotiation, Closed Won, Closed Lost]
+  customerCategories: [Standard, Key Account, Strategic]
+  industries: [Technology, Manufacturing, Retail, Services, Healthcare]
+  territories: [North, South, East, West, Central]
+  salesPersons: []
+  customerGroups: [Retail, Wholesale, Enterprise]
+  customerTypes: [Business, Individual]
+  followUpTypes: [Call, Email, Meeting, WhatsApp]
+  activityTypes: [Task, Call, Meeting, Note]
+  taskPriorities: [Low, Normal, High, Urgent]
+  paymentTermsOptions: ["Due on receipt", "Net 15", "Net 30", "Net 45", "Net 60"]
+
+chartOfAccounts:
+  ensureIndiaSystemCoa: true
+  recommendedGroups:
+    - Assets
+    - Current Assets
+    - Fixed Assets
+    - Cash
+    - Bank
+    - Accounts Receivable
+    - Inventory
+    - Deposits
+    - Loans & Advances
+    - Liabilities
+    - Current Liabilities
+    - Accounts Payable
+    - Duties & Taxes
+    - GST Payable
+    - TDS Payable
+    - Loans
+    - Equity
+    - Share Capital
+    - Reserves & Surplus
+    - Retained Earnings
+    - Income
+    - Sales
+    - Service Income
+    - Other Income
+    - Expenses
+    - Purchases
+    - Direct Expenses
+    - Employee Expenses
+    - Administrative Expenses
+    - Selling Expenses
+    - Finance Costs
+    - Depreciation
+    - Other Expenses
+  recommendedLedgerCodes:
+    - CASH
+    - BANK
+    - AR
+    - AP
+    - SALES
+    - PURCHASE
+    - CGST-IN
+    - SGST-IN
+    - IGST-IN
+    - CGST-OUT
+    - SGST-OUT
+    - IGST-OUT
+    - RETAINED
+    - CAPITAL
+    - INVENTORY
+    - COGS
+    - ROUNDOFF
+  notes:
+    - Statutory identity fields must be filled with real values before go-live.
+    - Do not store passwords, JWT secrets, or infrastructure credentials in this file.
+
+statutoryRegistrations:
+  - registrationType: CIN
+    registrationNumber: ""
+    isActive: true
+  - registrationType: PAN
+    registrationNumber: ""
+    isActive: true
+  - registrationType: TAN
+    registrationNumber: ""
+    isActive: true
+  - registrationType: GSTIN
+    registrationNumber: ""
+    isActive: false
+  - registrationType: UDYAM
+    registrationNumber: ""
+    isActive: false
+  - registrationType: IEC
+    registrationNumber: ""
+    isActive: false
+
+currencies:
+  - currencyCode: INR
+    currencyName: Indian Rupee
+    symbol: "₹"
+    decimalPlaces: 2
+    isBaseCurrency: true
+    isActive: true
+
+accountingSettings:
+  inventoryEnabled: false
+  valuationMethod: WeightedAverage
+  negativeStockAllowed: false
+  stockAccountingEnabled: false
+  autoCreateCustomerLedger: true
+  autoCreateSupplierLedger: true
+  autoPostSalesInvoice: true
+  defaultCashLedgerCode: CASH
+  defaultBankLedgerCode: BANK
+  defaultSalesLedgerCode: SALES
+  defaultArLedgerCode: AR
+  defaultApLedgerCode: AP

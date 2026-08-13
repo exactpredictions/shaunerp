@@ -1,0 +1,105 @@
+@page "/projects"
+@attribute [Authorize]
+@inject IProjectManagementService Projects
+
+<PageTitle>Projects — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">Project Management</p>
+            <h1>Projects workspace</h1>
+            <p class="muted">Delivery health, workload, and financial progress across active engagements.</p>
+        </div>
+        <div class="inline-actions">
+            <a class="btn ghost" href="/projects/list">All projects</a>
+            <a class="btn" href="/projects/new">New project</a>
+        </div>
+    </header>
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (_error is not null) { <div class="error-state">@_error</div> }
+    else if (_stats is not null)
+    {
+        <div class="stat-grid crm-stats">
+            <div class="stat-card"><strong>@_stats.ActiveProjects</strong><span>Active projects</span></div>
+            <div class="stat-card"><strong>@_stats.AtRiskProjects</strong><span>At risk</span></div>
+            <div class="stat-card"><strong>@_stats.OnHoldProjects</strong><span>On hold</span></div>
+            <div class="stat-card"><strong>@_stats.CompletedProjects</strong><span>Completed</span></div>
+            <div class="stat-card"><strong>@_stats.OpenTasks</strong><span>Open tasks</span></div>
+            <div class="stat-card"><strong>@_stats.OverdueTasks</strong><span>Overdue tasks</span></div>
+            <div class="stat-card"><strong>@_stats.TasksDueThisWeek</strong><span>Due this week</span></div>
+            <div class="stat-card"><strong>@_stats.MilestonesDueSoon</strong><span>Milestones due soon</span></div>
+            <div class="stat-card"><strong>@_stats.OpenIssues</strong><span>Open issues</span></div>
+            <div class="stat-card"><strong>@_stats.OpenRisks</strong><span>Open risks</span></div>
+            <div class="stat-card"><strong>@_stats.PendingTimesheets</strong><span>Timesheets to approve</span></div>
+            <div class="stat-card"><strong>@_stats.ActualHours.ToString("N1") / @_stats.EstimatedHours.ToString("N1")</strong><span>Hours actual / estimated</span></div>
+        </div>
+
+        @if (_stats.TotalBudget > 0 || _stats.ActualCost > 0)
+        {
+            <div class="stat-grid" style="margin-top:1rem">
+                <div class="stat-card"><strong>@_stats.TotalBudget.ToString("N0")</strong><span>Total budget</span></div>
+                <div class="stat-card"><strong>@_stats.ActualCost.ToString("N0")</strong><span>Actual cost</span></div>
+                <div class="stat-card"><strong>@((_stats.TotalBudget - _stats.ActualCost).ToString("N0"))</strong><span>Remaining budget</span></div>
+            </div>
+        }
+
+        <div class="panel" style="margin-top:1rem">
+            <h2>Recently updated</h2>
+            @if (_stats.RecentProjects.Count == 0)
+            {
+                <p class="muted">No projects yet. <a href="/projects/new">Create the first project</a>.</p>
+            }
+            else
+            {
+                <div class="table-wrap"><table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Code</th><th>Name</th><th>Customer</th><th>Status</th>
+                            <th>Health</th><th>Progress</th><th>Due</th><th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var p in _stats.RecentProjects)
+                    {
+                        <tr>
+                            <td class="mono">@p.ProjectCode</td>
+                            <td>@p.Name</td>
+                            <td>@(p.CustomerName ?? p.Customer?.CompanyName ?? "—")</td>
+                            <td><span class="pill @ProjectDisplay.StatusClass(p.ProjectStatus)">@p.ProjectStatus</span></td>
+                            <td><span class="pill @ProjectDisplay.HealthClass(p.HealthStatus)">@p.HealthStatus</span></td>
+                            <td>
+                                <div class="progress-bar"><span style="width:@ProjectDisplay.Pct(p.ProgressPercent)"></span></div>
+                                <span class="muted">@p.ProgressPercent.ToString("N0")%</span>
+                            </td>
+                            <td>@(p.PlannedEndDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                            <td><a href="@($"/projects/{p.Id}/workspace")">Open</a></td>
+                        </tr>
+                    }
+                    </tbody>
+                </table></div>
+            }
+        </div>
+
+        <div class="form-actions">
+            <a class="btn ghost" href="/projects/tasks">Task list</a>
+            <a class="btn ghost" href="/projects/kanban">Kanban</a>
+            <a class="btn ghost" href="/projects/my-work">My work</a>
+            <a class="btn ghost" href="/projects/timesheets">Timesheets</a>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private ProjectDashboardStats? _stats;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _stats = await Projects.DashboardAsync(); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+}

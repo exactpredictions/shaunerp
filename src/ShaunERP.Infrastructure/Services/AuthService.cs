@@ -13,7 +13,7 @@ namespace ShaunERP.Infrastructure.Services;
 
 public record AuthResult(bool Success, string? Token, DateTime? ExpiresAt, string? Error, UserDto? User, int? CompanyId, string? CompanyName);
 
-public record UserDto(int Id, string Username, string Email, string FirstName, string LastName, bool IsSystemAdmin);
+public record UserDto(int Id, string Username, string Email, string FirstName, string LastName, bool IsSystemAdmin, bool MustChangePassword = false);
 
 public record RegisterRequest(string Username, string Email, string Password, string FirstName, string LastName, string? CompanyName);
 
@@ -23,6 +23,7 @@ public interface IAuthService
 {
     Task<AuthResult> RegisterAsync(RegisterRequest request, CancellationToken ct = default);
     Task<AuthResult> LoginAsync(LoginRequest request, CancellationToken ct = default);
+    Task<(bool Ok, string? Error)> ChangePasswordAsync(int userId, string currentPassword, string newPassword, CancellationToken ct = default);
 }
 
 public class AuthService : IAuthService
@@ -126,6 +127,40 @@ public class AuthService : IAuthService
         return result;
     }
 
+    public async Task<(bool Ok, string? Error)> ChangePasswordAsync(
+        int userId, string currentPassword, string newPassword, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(newPassword) || newPassword.Length < 8)
+        {
+            return (false, "Password must be at least 8 characters.");
+        }
+
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
+        if (user is null || !user.IsActive)
+        {
+            return (false, "User not found.");
+        }
+
+        if (!BCrypt.Net.BCrypt.Verify(currentPassword, user.PasswordHash))
+        {
+            return (false, "Current password is incorrect.");
+        }
+
+        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPassword);
+        user.MustChangePassword = false;
+        user.UpdatedDate = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.WriteAsync(
+            "auth.password_change",
+            userId: user.Id,
+            entityType: "User",
+            entityId: user.Id.ToString(),
+            ct: ct);
+
+        return (true, null);
+    }
+
     private async Task<AuthResult> IssueTokenAsync(User user, int? preferredCompanyId, CancellationToken ct)
     {
         var snapshot = await _authz.BuildForUserAsync(user.Id, preferredCompanyId, ct);
@@ -138,6 +173,10 @@ public class AuthService : IAuthService
         var claims = _authz.ToClaims(snapshot, user).ToList();
         claims.Add(new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()));
         claims.Add(new Claim(JwtRegisteredClaimNames.UniqueName, user.Username));
+        if (user.MustChangePassword)
+        {
+            claims.Add(new Claim("must_change_password", "true"));
+        }
 
         var credentials = new SigningCredentials(
             new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),
@@ -162,7 +201,7 @@ public class AuthService : IAuthService
         });
         await _db.SaveChangesAsync(ct);
 
-        var dto = new UserDto(user.Id, user.Username, user.Email, user.FirstName, user.LastName, user.IsSystemAdmin);
+        var dto = new UserDto(user.Id, user.Username, user.Email, user.FirstName, user.LastName, user.IsSystemAdmin, user.MustChangePassword);
         return new AuthResult(true, encoded, expires, null, dto, snapshot.CompanyId, snapshot.CompanyName);
     }
 

@@ -1,0 +1,145 @@
+@page "/settings/production-initialization"
+@attribute [Authorize]
+@using ShaunERP.Core.ImportExport
+@inject IProductionInitializationService Production
+@inject ITenantContext Tenant
+@inject ShellStateService Shell
+
+<PageTitle>Production initialization — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">Settings</p>
+            <h1>Production initialization</h1>
+        </div>
+        <button class="btn ghost" @onclick="ScanAsync" disabled="@_busy">Scan demo data</button>
+    </header>
+
+    @if (_error is not null) { <div class="error-state">@_error</div> }
+    else if (_loading) { <div class="loading-state">Loading…</div> }
+    else if (!_allowed)
+    {
+        <div class="error-state">System administrator required.</div>
+    }
+    else
+    {
+        <div class="panel">
+            <p class="muted">Scan and remove demo-seed data carefully. Initialize the Shaun Infomedia production company shell without truncating schema or system CoA.</p>
+            <div class="form-actions">
+                <button class="btn ghost" @onclick="PreviewAsync" disabled="@_busy">Preview demo records</button>
+                <button class="btn" @onclick="RemoveAsync" disabled="@_busy">Remove demo data</button>
+                <button class="btn" @onclick="InitAsync" disabled="@_busy">Initialize production dataset</button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_message)) { <p class="muted">@_message</p> }
+
+            @if (_scan is not null)
+            {
+                <h2>Scan</h2>
+                <p>Company: @(_scan.CompanyName ?? "—") (#@_scan.CompanyId)</p>
+                <p>Demo admin: @(_scan.HasDemoAdmin ? "yes" : "no") · Demo company: @(_scan.HasDemoCompany ? "yes" : "no")</p>
+                <table class="data-table">
+                    <thead><tr><th>Entity</th><th>Count</th></tr></thead>
+                    <tbody>
+                    @foreach (var c in _scan.Counts)
+                    {
+                        <tr><td>@c.EntityType</td><td>@c.Count</td></tr>
+                    }
+                    </tbody>
+                </table>
+            }
+
+            @if (_preview is not null)
+            {
+                <h2>Sample keys</h2>
+                <ul>
+                    @foreach (var s in _preview.SampleKeys)
+                    {
+                        <li>@s</li>
+                    }
+                </ul>
+                <ul>
+                    @foreach (var w in _preview.Warnings)
+                    {
+                        <li class="muted">@w</li>
+                    }
+                </ul>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private bool _busy;
+    private bool _allowed;
+    private string? _error;
+    private string? _message;
+    private DemoDataScanResult? _scan;
+    private DemoDataPreview? _preview;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Shell.InitializeAsync();
+        _allowed = Tenant.IsSystemAdmin;
+        if (!_allowed)
+        {
+            _error = "System administrator required.";
+        }
+
+        _loading = false;
+    }
+
+    private async Task ScanAsync()
+    {
+        try
+        {
+            _busy = true;
+            _error = null;
+            _scan = await Production.ScanDemoDataAsync();
+            _message = "Scan complete.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task PreviewAsync()
+    {
+        try
+        {
+            _busy = true;
+            _preview = await Production.PreviewDemoRecordsAsync();
+            _scan = _preview.Scan;
+            _message = "Preview ready.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task RemoveAsync()
+    {
+        try
+        {
+            _busy = true;
+            var result = await Production.RemoveDemoDataAsync();
+            _message = string.Join(" ", result.Messages);
+            if (!result.Success) _error = _message;
+            _scan = await Production.ScanDemoDataAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task InitAsync()
+    {
+        try
+        {
+            _busy = true;
+            var result = await Production.InitializeProductionDatasetAsync();
+            _message = string.Join(" ", result.Messages);
+            if (!result.Success) _error = _message;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}

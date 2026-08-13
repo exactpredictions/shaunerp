@@ -1,0 +1,3 @@
+AccountNumber,CompanyName,PrimaryContact,Email,PhoneNumber,BillingAddress,PaymentTerms,CreditLimit,TaxId,Industry,Website,CustomerType,Territory,Tags
+SAMPLE-VEND-001,SAMPLE Vendor Supplies,SAMPLE Kumar,sample.vendor1@example.com,+91-9000000001,"SAMPLE Industrial Estate",Net 30,0,33AAAAA0000B1Z5,Wholesale,,Business,South,sample
+SAMPLE-VEND-002,SAMPLE Print House,SAMPLE Devi,sample.vendor2@example.com,+91-9000000002,"SAMPLE Press Road",Net 15,0,,,Services,,sample

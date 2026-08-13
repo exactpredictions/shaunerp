@@ -1,0 +1,202 @@
+@using System.Text
+@using ShaunERP.Core.ImportExport
+@inject ICsvImportEngine ImportEngine
+@inject ICsvExportService ExportService
+@inject ITenantContext Tenant
+
+<div class="panel import-export-panel">
+    <div class="import-export-head">
+        <h2>Import / Export — @_displayName</h2>
+        <p class="muted">Upload CSV to preview, then confirm.</p>
+    </div>
+
+    @if (!_canAccess)
+    {
+        <div class="error-state">Import/export permission required.</div>
+    }
+    else
+    {
+        <div class="page-toolbar import-export-toolbar">
+            <button class="btn ghost" type="button" @onclick="DownloadSampleAsync">Download Sample CSV</button>
+            <button class="btn ghost" type="button" @onclick="ExportAsync" disabled="@_busy">Export CSV</button>
+            <label class="import-export-upload">
+                <span class="btn ghost">Upload CSV</span>
+                <InputFile OnChange="OnFileSelected" accept=".csv,text/csv" />
+            </label>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_message))
+        {
+            <p class="muted">@_message</p>
+        }
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <div class="error-state">@_error</div>
+        }
+
+        @if (_preview is not null)
+        {
+            <p>
+                Valid: @_preview.ValidCount · Invalid: @_preview.InvalidCount ·
+                Create: @_preview.CreateCount · Update: @_preview.UpdateCount
+            </p>
+            @if (_preview.HeaderErrors.Count > 0)
+            {
+                <ul>
+                    @foreach (var err in _preview.HeaderErrors)
+                    {
+                        <li class="error-state">@err</li>
+                    }
+                </ul>
+            }
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Action</th>
+                            <th>Status</th>
+                            <th>Errors</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var row in _preview.Rows.Take(25))
+                    {
+                        <tr>
+                            <td>@row.RowNumber</td>
+                            <td>@row.Action</td>
+                            <td>@(row.IsValid ? "OK" : "Invalid")</td>
+                            <td>@string.Join("; ", row.Errors)</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+            <div class="form-actions">
+                <button class="btn" type="button" disabled="@(!_preview.CanApply || _busy)" @onclick="ApplyAsync">Confirm import</button>
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(_downloadName) && _downloadBytes is not null)
+        {
+            <p>
+                <a class="btn ghost" href="@($"data:text/csv;base64,{Convert.ToBase64String(_downloadBytes)}")" download="@_downloadName">
+                    Download @_downloadName
+                </a>
+            </p>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string EntityKey { get; set; } = string.Empty;
+
+    private string _displayName = "CSV";
+    private bool _canAccess;
+    private bool _busy;
+    private string? _message;
+    private string? _error;
+    private CsvImportPreview? _preview;
+    private byte[]? _downloadBytes;
+    private string? _downloadName;
+
+    protected override void OnParametersSet()
+    {
+        _canAccess = Tenant.IsSystemAdmin || Tenant.Permissions.Contains(Permissions.SettingsImportExport);
+        var importer = ImportEngine.GetImporter(EntityKey);
+        _displayName = importer?.DisplayName ?? EntityKey;
+    }
+
+    private async Task OnFileSelected(InputFileChangeEventArgs e)
+    {
+        _error = null;
+        _message = null;
+        _preview = null;
+        try
+        {
+            _busy = true;
+            await using var stream = e.File.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024);
+            using var reader = new StreamReader(stream);
+            var content = await reader.ReadToEndAsync();
+            _preview = await ImportEngine.PreviewAsync(EntityKey, content);
+            _message = "Preview ready. Review rows then confirm.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ApplyAsync()
+    {
+        if (_preview is null) return;
+        try
+        {
+            _busy = true;
+            _error = null;
+            var result = await ImportEngine.ApplyAsync(EntityKey, _preview);
+            _message = result.Success
+                ? $"Import complete. Created {result.Created}, updated {result.Updated}, skipped {result.Skipped}."
+                : string.Join(" ", result.Messages);
+            if (!string.IsNullOrWhiteSpace(result.ErrorCsv))
+            {
+                _downloadBytes = Encoding.UTF8.GetBytes(result.ErrorCsv);
+                _downloadName = $"{EntityKey}-errors.csv";
+            }
+
+            if (!result.Success)
+            {
+                _error = string.Join(" ", result.Messages);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task DownloadSampleAsync()
+    {
+        try
+        {
+            var sample = ImportEngine.GetSampleCsv(EntityKey);
+            _downloadBytes = Encoding.UTF8.GetBytes(sample);
+            _downloadName = $"{EntityKey}-sample.csv";
+            _message = "Sample CSV ready to download.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task ExportAsync()
+    {
+        try
+        {
+            _busy = true;
+            var result = await ExportService.ExportAsync(EntityKey);
+            _downloadBytes = Encoding.UTF8.GetBytes(result.CsvContent);
+            _downloadName = result.FileName;
+            _message = $"Exported {result.RowCount} row(s).";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

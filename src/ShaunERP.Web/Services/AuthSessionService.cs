@@ -41,7 +41,12 @@ public class AuthSessionService
         var snapshot = await _authz.BuildForUserAsync(user.Id, companyId);
         _tenant.Set(snapshot);
 
-        var claims = _authz.ToClaims(snapshot, user);
+        var claims = _authz.ToClaims(snapshot, user).ToList();
+        if (user.MustChangePassword)
+        {
+            claims.Add(new Claim("must_change_password", "true"));
+        }
+
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
 
         await _audit.WriteAsync(
@@ -72,7 +77,12 @@ public class AuthSessionService
         var snapshot = await _authz.BuildForUserAsync(userId, companyId);
         _tenant.Set(snapshot);
 
-        var claims = _authz.ToClaims(snapshot, user);
+        var claims = _authz.ToClaims(snapshot, user).ToList();
+        if (user.MustChangePassword)
+        {
+            claims.Add(new Claim("must_change_password", "true"));
+        }
+
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
 
         await _audit.WriteAsync(
@@ -84,5 +94,32 @@ public class AuthSessionService
             afterValues: snapshot.CompanyName);
 
         return new AuthSessionResult(true, new ClaimsPrincipal(identity), null, companyId);
+    }
+
+    public async Task<AuthSessionResult> RefreshPrincipalAsync(ClaimsPrincipal current)
+    {
+        var userIdValue = current.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!int.TryParse(userIdValue, out var userId))
+        {
+            return new AuthSessionResult(false, null, "Not authenticated.", null);
+        }
+
+        int? companyId = int.TryParse(current.FindFirstValue("company_id"), out var cid) ? cid : null;
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user is null || !user.IsActive)
+        {
+            return new AuthSessionResult(false, null, "User not found.", null);
+        }
+
+        var snapshot = await _authz.BuildForUserAsync(userId, companyId);
+        _tenant.Set(snapshot);
+        var claims = _authz.ToClaims(snapshot, user).ToList();
+        if (user.MustChangePassword)
+        {
+            claims.Add(new Claim("must_change_password", "true"));
+        }
+
+        var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        return new AuthSessionResult(true, new ClaimsPrincipal(identity), null, snapshot.CompanyId);
     }
 }

@@ -11,6 +11,7 @@ public static class ModuleKeys
     public const string Hrms = "hrms";
     public const string Projects = "projects";
     public const string Platform = "platform";
+    public const string Settings = "settings";
 
     public static string Normalize(string? keyOrName)
     {
@@ -30,6 +31,7 @@ public static class ModuleKeys
             "hrms" or "hr" or "human-resources" or "human resources" => Hrms,
             "projects" or "project" => Projects,
             "platform" or "admin" or "platform-admin" => Platform,
+            "settings" or "configuration" or "company-settings" => Settings,
             "home" or "dashboard" or "main" => Home,
             _ => value
         };

@@ -29,11 +29,25 @@ public class DbSeeder
         await EnsureFinanceSchemaAsync(ct);
         await EnsureSalesOrderSchemaAsync(ct);
         await AccountingSchema.EnsureAsync(_db, _logger, ct);
+        await ProjectsSchema.EnsureAsync(_db, _logger, ct);
         await EnsureRolesAndPermissionsAsync(ct);
         await NormalizeCompanyModulesAsync(ct);
 
+        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production";
+        var isProduction = environment.Equals("Production", StringComparison.OrdinalIgnoreCase);
+        var seedDemoEnv = Environment.GetEnvironmentVariable("SEED_DEMO_DATA");
+        var seedDemo = !isProduction && !string.Equals(seedDemoEnv, "false", StringComparison.OrdinalIgnoreCase);
+
         if (!await _db.Users.AnyAsync(ct))
         {
+            if (isProduction || string.Equals(seedDemoEnv, "false", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning(
+                    "No users found. Production/demo-seed-disabled mode will NOT create admin/Admin@12345. " +
+                    "Use ShaunERP.Tools bootstrap-users (or production bootstrap script) with passwords from environment.");
+            }
+            else
+            {
             _logger.LogInformation("Seeding demo admin user and sample company...");
 
             var admin = new User
@@ -44,7 +58,8 @@ public class DbSeeder
                 LastName = "Admin",
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword("Admin@12345"),
                 IsActive = true,
-                IsSystemAdmin = true
+                IsSystemAdmin = true,
+                MustChangePassword = false
             };
             _db.Users.Add(admin);
             await _db.SaveChangesAsync(ct);
@@ -65,6 +80,7 @@ public class DbSeeder
                 Module(company.Id, ModuleKeys.Finance, "Finance"),
                 Module(company.Id, ModuleKeys.Orders, "Sales Orders"),
                 Module(company.Id, ModuleKeys.Accounting, "Accounting"),
+                Module(company.Id, ModuleKeys.Settings, "Settings"),
                 Module(company.Id, ModuleKeys.Hrms, "HRMS"),
                 Module(company.Id, ModuleKeys.Projects, "Projects"),
                 Module(company.Id, ModuleKeys.Users, "Users"));
@@ -99,17 +115,26 @@ public class DbSeeder
                 new GlAccount { CompanyMasterId = books.Id, Name = "Operating Expense", AccountNumber = "5000", Type = AccountType.Expense });
 
             await _db.SaveChangesAsync(ct);
-            _logger.LogInformation("Seed complete. Login: admin / Admin@12345");
+            _logger.LogInformation("Seed complete. Development login: admin / Admin@12345 (demo only)");
+            }
         }
 
-        try
+        if (seedDemo)
         {
-            await SeedRichDemoDataAsync(ct);
+            try
+            {
+                await SeedRichDemoDataAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Rich CRM/Finance demo seed failed; continuing startup.");
+            }
         }
-        catch (Exception ex)
+        else
         {
-            _logger.LogError(ex, "Rich CRM/Finance demo seed failed; continuing startup.");
+            _logger.LogInformation("Skipping rich demo seed (Production or SEED_DEMO_DATA=false).");
         }
+
         await AssignOrphanCrmToFirstCompanyAsync(ct);
         await AssignOrphanFinanceToFirstCompanyAsync(ct);
     }
@@ -216,6 +241,22 @@ public class DbSeeder
             if (!hasAccounting)
             {
                 _db.CompanyModules.Add(Module(companyId, ModuleKeys.Accounting, "Accounting"));
+            }
+
+            var hasSettings = existing.Any(m =>
+                m.CompanyId == companyId &&
+                m.ModuleKey.Equals(ModuleKeys.Settings, StringComparison.OrdinalIgnoreCase));
+            if (!hasSettings)
+            {
+                _db.CompanyModules.Add(Module(companyId, ModuleKeys.Settings, "Settings"));
+            }
+
+            var hasProjects = existing.Any(m =>
+                m.CompanyId == companyId &&
+                m.ModuleKey.Equals(ModuleKeys.Projects, StringComparison.OrdinalIgnoreCase));
+            if (!hasProjects)
+            {
+                _db.CompanyModules.Add(Module(companyId, ModuleKeys.Projects, "Projects"));
             }
         }
 
@@ -1050,6 +1091,10 @@ public class DbSeeder
 
         await _db.Database.ExecuteSqlRawAsync("""
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_Permissions_Name" ON "Permissions" ("Name");
+            """, ct);
+
+        await _db.Database.ExecuteSqlRawAsync("""
+            ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "MustChangePassword" boolean NOT NULL DEFAULT FALSE;
             """, ct);
     }
 

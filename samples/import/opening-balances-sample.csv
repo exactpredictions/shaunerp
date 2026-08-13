@@ -1,0 +1,4 @@
+LedgerCode,OpeningDebit,OpeningCredit
+CASH,10000.00,0
+BANK,50000.00,0
+CAPITAL,0,60000.00

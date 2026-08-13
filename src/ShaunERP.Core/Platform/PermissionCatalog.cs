@@ -111,6 +111,36 @@ public static class Permissions
     public const string CompanySettingsEdit = "company.settings.edit";
     public const string GstSettingsManage = "gst.settings.manage";
 
+    public const string ProjectsAccess = "projects.access";
+    public const string ProjectsDashboardView = "projects.dashboard.view";
+    public const string ProjectsView = "projects.view";
+    /// <summary>See every project in the account, not only ones the user owns/manages/is a member of.</summary>
+    public const string ProjectsViewAll = "projects.view_all";
+    public const string ProjectsCreate = "projects.create";
+    public const string ProjectsUpdate = "projects.update";
+    public const string ProjectsDelete = "projects.delete";
+    public const string ProjectsArchive = "projects.archive";
+    public const string ProjectsTasksView = "projects.tasks.view";
+    public const string ProjectsTasksCreate = "projects.tasks.create";
+    public const string ProjectsTasksUpdate = "projects.tasks.update";
+    public const string ProjectsTasksAssign = "projects.tasks.assign";
+    public const string ProjectsTasksDelete = "projects.tasks.delete";
+    public const string ProjectsTimesheetsCreate = "projects.timesheets.create";
+    public const string ProjectsTimesheetsSubmit = "projects.timesheets.submit";
+    public const string ProjectsTimesheetsApprove = "projects.timesheets.approve";
+    public const string ProjectsBudgetView = "projects.budget.view";
+    public const string ProjectsBudgetEdit = "projects.budget.edit";
+    public const string ProjectsFinancialsView = "projects.financials.view";
+    public const string ProjectsIssuesManage = "projects.issues.manage";
+    public const string ProjectsRisksManage = "projects.risks.manage";
+    public const string ProjectsChangeRequestsCreate = "projects.change_requests.create";
+    public const string ProjectsChangeRequestsApprove = "projects.change_requests.approve";
+    public const string ProjectsTemplatesManage = "projects.templates.manage";
+
+    public const string SettingsCompanyConfigManage = "settings.company_config.manage";
+    public const string SettingsImportExport = "settings.import_export";
+    public const string SettingsProductionInit = "settings.production_init";
+
     public const string PlatformAccess = "platform.access";
     public const string PlatformTenantsManage = "platform.tenants.manage";
     public const string PlatformModulesManage = "platform.modules.manage";
@@ -142,6 +172,14 @@ public static class Permissions
         AccountingVouchersView, AccountingVouchersCreate, AccountingVouchersPost, AccountingVouchersReverse,
         AccountingReportsView, AccountingSettingsManage, AccountingFinancialYearManage, AccountingPeriodLockManage,
         CompanySettingsView, CompanySettingsEdit, GstSettingsManage,
+        ProjectsAccess, ProjectsDashboardView, ProjectsView, ProjectsViewAll,
+        ProjectsCreate, ProjectsUpdate, ProjectsDelete, ProjectsArchive,
+        ProjectsTasksView, ProjectsTasksCreate, ProjectsTasksUpdate, ProjectsTasksAssign, ProjectsTasksDelete,
+        ProjectsTimesheetsCreate, ProjectsTimesheetsSubmit, ProjectsTimesheetsApprove,
+        ProjectsBudgetView, ProjectsBudgetEdit, ProjectsFinancialsView,
+        ProjectsIssuesManage, ProjectsRisksManage,
+        ProjectsChangeRequestsCreate, ProjectsChangeRequestsApprove, ProjectsTemplatesManage,
+        SettingsCompanyConfigManage, SettingsImportExport, SettingsProductionInit,
         PlatformAccess, PlatformTenantsManage, PlatformModulesManage
     ];
 
@@ -175,7 +213,15 @@ public static class Permissions
         AccountingAccess, AccountingView, AccountingLedgersView, AccountingLedgersCreate, AccountingLedgersEdit,
         AccountingVouchersView, AccountingVouchersCreate, AccountingVouchersPost, AccountingVouchersReverse,
         AccountingReportsView, AccountingSettingsManage, AccountingFinancialYearManage, AccountingPeriodLockManage,
-        CompanySettingsView, CompanySettingsEdit, GstSettingsManage
+        CompanySettingsView, CompanySettingsEdit, GstSettingsManage,
+        ProjectsAccess, ProjectsDashboardView, ProjectsView, ProjectsViewAll,
+        ProjectsCreate, ProjectsUpdate, ProjectsDelete, ProjectsArchive,
+        ProjectsTasksView, ProjectsTasksCreate, ProjectsTasksUpdate, ProjectsTasksAssign, ProjectsTasksDelete,
+        ProjectsTimesheetsCreate, ProjectsTimesheetsSubmit, ProjectsTimesheetsApprove,
+        ProjectsBudgetView, ProjectsBudgetEdit, ProjectsFinancialsView,
+        ProjectsIssuesManage, ProjectsRisksManage,
+        ProjectsChangeRequestsCreate, ProjectsChangeRequestsApprove, ProjectsTemplatesManage,
+        SettingsCompanyConfigManage, SettingsImportExport
     ];
 
     public static IReadOnlyList<string> UserDefaults { get; } =
@@ -199,6 +245,9 @@ public static class Permissions
         OrdersConfirm, OrdersCreateInvoice,
         AccountingAccess, AccountingView, AccountingLedgersView,
         AccountingVouchersView, AccountingVouchersCreate, AccountingReportsView,
-        CompanySettingsView
+        CompanySettingsView,
+        ProjectsAccess, ProjectsDashboardView, ProjectsView,
+        ProjectsTasksView, ProjectsTasksCreate, ProjectsTasksUpdate,
+        ProjectsTimesheetsCreate, ProjectsTimesheetsSubmit
     ];
 }

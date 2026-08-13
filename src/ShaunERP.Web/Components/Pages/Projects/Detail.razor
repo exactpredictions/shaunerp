@@ -1,0 +1,957 @@
+@page "/projects/{Id:int}/workspace"
+@attribute [Authorize]
+@inject IProjectManagementService Projects
+
+<PageTitle>@(_project?.Name ?? "Project") — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">Project Management</p>
+            <h1>@(_project?.Name ?? $"Project #{Id}")</h1>
+            @if (_project is not null)
+            {
+                <p class="muted">
+                    <span class="mono">@_project.ProjectCode</span>
+                    · <span class="pill @ProjectDisplay.StatusClass(_project.ProjectStatus)">@_project.ProjectStatus</span>
+                    · <span class="pill @ProjectDisplay.HealthClass(_project.HealthStatus)">@_project.HealthStatus</span>
+                    · @(_project.CustomerName ?? _project.Customer?.CompanyName ?? "Internal")
+                </p>
+            }
+        </div>
+        <div class="inline-actions">
+            <a class="btn ghost" href="@($"/projects/{Id}")">Edit project</a>
+            <a class="btn ghost" href="/projects/list">All projects</a>
+        </div>
+    </header>
+
+    @if (_error is not null) { <div class="alert">@_error</div> }
+    @if (_ok is not null) { <div class="ok-msg">@_ok</div> }
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (_project is null) { <div class="error-state">Project not found or not accessible.</div> }
+    else
+    {
+        <nav class="tabstrip">
+            @foreach (var tab in Tabs)
+            {
+                var current = tab;
+                <button type="button" class="@(_tab == current ? "active" : "")" @onclick="() => SelectTabAsync(current)">@current</button>
+            }
+        </nav>
+
+        @CurrentTab
+    }
+</section>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private static readonly string[] Tabs =
+    [
+        "Overview", "Tasks", "Board", "Milestones", "Team",
+        "Issues", "Risks", "Changes", "Timesheets", "Activity"
+    ];
+
+    private string _tab = "Overview";
+    private bool _loading = true, _busy;
+    private string? _error, _ok;
+    private Project? _project;
+    private List<ShaunERP.Core.Identity.User> _users = new();
+
+    private List<ProjectTask> _tasks = new();
+    private List<ProjectPhase> _phases = new();
+    private List<ProjectMilestone> _milestones = new();
+    private List<ProjectMember> _members = new();
+    private List<Issue> _issues = new();
+    private List<ProjectRisk> _risks = new();
+    private List<ProjectChangeRequest> _changes = new();
+    private List<ProjectTimesheet> _timesheets = new();
+    private List<ProjectComment> _comments = new();
+    private List<ProjectAttachment> _attachments = new();
+
+    // draft state for inline creation forms
+    private ProjectTask _taskDraft = new();
+    private string _taskAssignee = "", _taskPhase = "";
+    private ProjectMilestone _milestoneDraft = new();
+    private DateTime? _milestoneDate = DateTime.UtcNow.Date.AddDays(14);
+    private string _memberUserId = "", _memberRole = "Member";
+    private ProjectPhase _phaseDraft = new();
+    private Issue _issueDraft = new();
+    private ProjectRisk _riskDraft = new();
+    private ProjectChangeRequest _changeDraft = new();
+    private string _commentBody = "";
+
+    private RenderFragment CurrentTab => _tab switch
+    {
+        "Tasks" => TasksTab,
+        "Board" => BoardTab,
+        "Milestones" => MilestonesTab,
+        "Team" => TeamTab,
+        "Issues" => IssuesTab,
+        "Risks" => RisksTab,
+        "Changes" => ChangesTab,
+        "Timesheets" => TimesheetsTab,
+        "Activity" => ActivityTab,
+        _ => OverviewTab
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true; _error = null; _ok = null;
+        try
+        {
+            _project = await Projects.GetProjectAsync(Id);
+            if (_project is null) return;
+            _users = (await Projects.ListCompanyUsersAsync()).ToList();
+            await LoadTabAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task SelectTabAsync(string tab)
+    {
+        _tab = tab; _error = null; _ok = null;
+        await LoadTabAsync();
+    }
+
+    private async Task LoadTabAsync()
+    {
+        try
+        {
+            switch (_tab)
+            {
+                case "Overview":
+                    _tasks = (await Projects.ListTasksAsync(new ProjectTaskFilter { ProjectId = Id, Take = 500 })).Items.ToList();
+                    _milestones = (await Projects.ListMilestonesAsync(Id)).ToList();
+                    break;
+                case "Tasks":
+                    _tasks = (await Projects.ListTasksAsync(new ProjectTaskFilter { ProjectId = Id, Take = 500 })).Items.ToList();
+                    _phases = (await Projects.ListPhasesAsync(Id)).ToList();
+                    break;
+                case "Milestones":
+                    _milestones = (await Projects.ListMilestonesAsync(Id)).ToList();
+                    _phases = (await Projects.ListPhasesAsync(Id)).ToList();
+                    break;
+                case "Team":
+                    _members = (await Projects.ListMembersAsync(Id)).ToList();
+                    break;
+                case "Issues":
+                    _issues = (await Projects.ListIssuesAsync(Id)).ToList();
+                    break;
+                case "Risks":
+                    _risks = (await Projects.ListRisksAsync(Id)).ToList();
+                    break;
+                case "Changes":
+                    _changes = (await Projects.ListChangeRequestsAsync(Id)).ToList();
+                    break;
+                case "Timesheets":
+                    _timesheets = (await Projects.ListTimesheetsAsync(new TimesheetFilter { ProjectId = Id })).ToList();
+                    break;
+                case "Activity":
+                    _comments = (await Projects.ListCommentsAsync(ProjectCommentEntityType.Project, Id)).ToList();
+                    _attachments = (await Projects.ListAttachmentsAsync(ProjectCommentEntityType.Project, Id)).ToList();
+                    break;
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task RunAsync(Func<Task> action, string? success = null)
+    {
+        _busy = true; _error = null; _ok = null;
+        try
+        {
+            await action();
+            _project = await Projects.GetProjectAsync(Id) ?? _project;
+            await LoadTabAsync();
+            _ok = success;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    // ————————————————— Overview —————————————————
+
+    private RenderFragment OverviewTab => __builder =>
+    {
+        var project = _project!;
+        var open = _tasks.Count(t => t.TaskStatus is not ProjectTaskStatus.Completed and not ProjectTaskStatus.Cancelled);
+        var overdue = _tasks.Count(ProjectDisplay.IsOverdue);
+
+        <div class="stat-grid crm-stats">
+            <div class="stat-card"><strong>@project.ProgressPercent.ToString("N0")%</strong><span>Progress</span></div>
+            <div class="stat-card"><strong>@open</strong><span>Open tasks</span></div>
+            <div class="stat-card"><strong>@overdue</strong><span>Overdue tasks</span></div>
+            <div class="stat-card"><strong>@project.ActualHours.ToString("N1") / @project.EstimatedHours.ToString("N1")</strong><span>Hours</span></div>
+            <div class="stat-card"><strong>@project.Budget.ToString("N0") @project.CurrencyCode</strong><span>Budget</span></div>
+            <div class="stat-card"><strong>@project.ActualCost.ToString("N0")</strong><span>Actual cost</span></div>
+            <div class="stat-card"><strong>@ProjectDisplay.Date(project.PlannedStartDate)</strong><span>Planned start</span></div>
+            <div class="stat-card"><strong>@ProjectDisplay.Date(project.PlannedEndDate)</strong><span>Planned end</span></div>
+        </div>
+
+        <div class="dashboard-grid" style="margin-top:1rem">
+            <div class="panel">
+                <h2>Details</h2>
+                <p class="muted">@(string.IsNullOrWhiteSpace(project.Description) ? "No description." : project.Description)</p>
+                <ul class="list-plain">
+                    <li>Manager: @ProjectDisplay.UserName(project.ManagerUser)</li>
+                    <li>Owner: @ProjectDisplay.UserName(project.OwnerUser)</li>
+                    <li>Billing: @project.BillingType</li>
+                    <li>Priority: @project.Priority</li>
+                    <li>Type: @(project.ProjectType ?? "—")</li>
+                    @if (project.SalesOrderId is not null)
+                    {
+                        <li>Sales order: <a href="@($"/orders/{project.SalesOrderId}")">#@project.SalesOrderId</a></li>
+                    }
+                </ul>
+            </div>
+            <div class="panel">
+                <h2>Upcoming milestones</h2>
+                @if (_milestones.Count == 0)
+                {
+                    <p class="muted">No milestones defined.</p>
+                }
+                else
+                {
+                    <ul class="list-plain">
+                        @foreach (var m in _milestones.Where(m => m.MilestoneStatus != ProjectMilestoneStatus.Completed).Take(6))
+                        {
+                            <li>@m.Name <span class="muted">— @ProjectDisplay.Date(m.PlannedDate)</span></li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    };
+
+    // ————————————————— Tasks —————————————————
+
+    private RenderFragment TasksTab => __builder =>
+    {
+        <div class="panel">
+            <h2>Add task</h2>
+            <div class="form-grid">
+                <label>Name<input value="@_taskDraft.Name" @onchange="e => _taskDraft.Name = e.Value?.ToString() ?? string.Empty" /></label>
+                <label>Assignee
+                    <select value="@_taskAssignee" @onchange="e => _taskAssignee = e.Value?.ToString() ?? string.Empty">
+                        <option value="">— Unassigned —</option>
+                        @foreach (var u in _users)
+                        {
+                            <option value="@u.Id">@ProjectDisplay.UserName(u)</option>
+                        }
+                    </select>
+                </label>
+                <label>Phase
+                    <select value="@_taskPhase" @onchange="e => _taskPhase = e.Value?.ToString() ?? string.Empty">
+                        <option value="">— None —</option>
+                        @foreach (var p in _phases)
+                        {
+                            <option value="@p.Id">@p.Name</option>
+                        }
+                    </select>
+                </label>
+                <label>Priority
+                    <select value="@_taskDraft.Priority"
+                            @onchange="e => _taskDraft.Priority = Enum.TryParse<ProjectPriority>(e.Value?.ToString(), out var v) ? v : ProjectPriority.Medium">
+                        @foreach (var p in Enum.GetValues<ProjectPriority>())
+                        {
+                            <option value="@p">@p</option>
+                        }
+                    </select>
+                </label>
+                <label>Due date
+                    <input type="date" value="@(_taskDraft.DueDate?.ToString("yyyy-MM-dd"))"
+                           @onchange="e => _taskDraft.DueDate = DateTime.TryParse(e.Value?.ToString(), out var d) ? d.Date : null" />
+                </label>
+                <label>Estimated hours
+                    <input type="number" step="0.5" min="0" value="@_taskDraft.EstimatedHours"
+                           @onchange="e => _taskDraft.EstimatedHours = decimal.TryParse(e.Value?.ToString(), out var h) ? h : 0" />
+                </label>
+            </div>
+            <div class="form-actions">
+                <button class="btn" type="button" disabled="@_busy" @onclick="AddTaskAsync">Add task</button>
+            </div>
+        </div>
+
+        <div class="table-wrap"><table class="data-table">
+            <thead>
+                <tr><th>Task</th><th>Name</th><th>Assignee</th><th>Status</th><th>Priority</th><th>Due</th><th class="num">Est.</th><th class="num">Actual</th><th></th></tr>
+            </thead>
+            <tbody>
+            @foreach (var t in _tasks)
+            {
+                var current = t;
+                <tr>
+                    <td class="mono">@current.TaskNumber</td>
+                    <td>@current.Name</td>
+                    <td>@ProjectDisplay.UserName(current.AssigneeUser)</td>
+                    <td>
+                        <select value="@current.TaskStatus" disabled="@_busy"
+                                @onchange="e => ChangeTaskStatusAsync(current.Id, e.Value?.ToString())">
+                            @foreach (var s in ProjectDisplay.KanbanColumns)
+                            {
+                                <option value="@s">@ProjectDisplay.Label(s)</option>
+                            }
+                        </select>
+                    </td>
+                    <td><span class="pill @ProjectDisplay.PriorityClass(current.Priority)">@current.Priority</span></td>
+                    <td class="@(ProjectDisplay.IsOverdue(current) ? "text-danger" : "")">@ProjectDisplay.Date(current.DueDate)</td>
+                    <td class="num mono">@current.EstimatedHours.ToString("N1")</td>
+                    <td class="num mono">@current.ActualHours.ToString("N1")</td>
+                    <td><button class="btn ghost danger" type="button" disabled="@_busy" @onclick="() => DeleteTaskAsync(current.Id)">Delete</button></td>
+                </tr>
+            }
+            </tbody>
+        </table></div>
+    };
+
+    private Task AddTaskAsync() => RunAsync(async () =>
+    {
+        _taskDraft.ProjectId = Id;
+        _taskDraft.AssigneeUserId = int.TryParse(_taskAssignee, out var aid) && aid > 0 ? aid : null;
+        _taskDraft.PhaseId = int.TryParse(_taskPhase, out var pid) && pid > 0 ? pid : null;
+        await Projects.CreateTaskAsync(_taskDraft);
+        _taskDraft = new ProjectTask();
+        _taskAssignee = ""; _taskPhase = "";
+    }, "Task created.");
+
+    private Task ChangeTaskStatusAsync(int taskId, string? raw) => RunAsync(async () =>
+    {
+        if (Enum.TryParse<ProjectTaskStatus>(raw, out var status))
+            await Projects.UpdateTaskStatusAsync(taskId, status);
+    });
+
+    private Task DeleteTaskAsync(int taskId) => RunAsync(
+        async () => await Projects.DeleteTaskAsync(taskId), "Task deleted.");
+
+    // ————————————————— Board —————————————————
+
+    private RenderFragment BoardTab => __builder =>
+    {
+        <ProjectKanbanBoard ProjectId="Id" />
+    };
+
+    // ————————————————— Milestones —————————————————
+
+    private RenderFragment MilestonesTab => __builder =>
+    {
+        <div class="panel">
+            <h2>Phases</h2>
+            <div class="form-grid">
+                <label>Phase name<input value="@_phaseDraft.Name" @onchange="e => _phaseDraft.Name = e.Value?.ToString() ?? string.Empty" /></label>
+                <label>Due date
+                    <input type="date" value="@(_phaseDraft.DueDate?.ToString("yyyy-MM-dd"))"
+                           @onchange="e => _phaseDraft.DueDate = DateTime.TryParse(e.Value?.ToString(), out var d) ? d.Date : null" />
+                </label>
+            </div>
+            <div class="form-actions">
+                <button class="btn ghost" type="button" disabled="@_busy" @onclick="AddPhaseAsync">Add phase</button>
+            </div>
+            @if (_phases.Count > 0)
+            {
+                <div class="table-wrap"><table class="data-table">
+                    <thead><tr><th>Phase</th><th>Status</th><th>Start</th><th>Due</th><th>Progress</th></tr></thead>
+                    <tbody>
+                    @foreach (var p in _phases)
+                    {
+                        <tr>
+                            <td>@p.Name</td>
+                            <td>@p.PhaseStatus</td>
+                            <td>@ProjectDisplay.Date(p.StartDate)</td>
+                            <td>@ProjectDisplay.Date(p.DueDate)</td>
+                            <td>@p.ProgressPercent.ToString("N0")%</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table></div>
+            }
+        </div>
+
+        <div class="panel">
+            <h2>Milestones</h2>
+            <div class="form-grid">
+                <label>Name<input value="@_milestoneDraft.Name" @onchange="e => _milestoneDraft.Name = e.Value?.ToString() ?? string.Empty" /></label>
+                <label>Planned date
+                    <input type="date" value="@(_milestoneDate?.ToString("yyyy-MM-dd"))"
+                           @onchange="e => _milestoneDate = DateTime.TryParse(e.Value?.ToString(), out var d) ? d.Date : null" />
+                </label>
+                <label class="checkbox">
+                    <input type="checkbox" checked="@_milestoneDraft.CustomerApprovalRequired"
+                           @onchange="e => _milestoneDraft.CustomerApprovalRequired = (bool)(e.Value ?? false)" />
+                    <span>Customer approval required</span>
+                </label>
+            </div>
+            <div class="form-actions">
+                <button class="btn" type="button" disabled="@_busy" @onclick="AddMilestoneAsync">Add milestone</button>
+            </div>
+
+            @if (_milestones.Count == 0)
+            {
+                <p class="muted">No milestones yet.</p>
+            }
+            else
+            {
+                <div class="table-wrap"><table class="data-table">
+                    <thead><tr><th>Milestone</th><th>Planned</th><th>Completed</th><th>Status</th><th>Approval</th><th></th></tr></thead>
+                    <tbody>
+                    @foreach (var m in _milestones)
+                    {
+                        var current = m;
+                        <tr>
+                            <td>@current.Name</td>
+                            <td>@ProjectDisplay.Date(current.PlannedDate)</td>
+                            <td>@ProjectDisplay.Date(current.ActualCompletionDate)</td>
+                            <td>
+                                <select value="@current.MilestoneStatus" disabled="@_busy"
+                                        @onchange="e => ChangeMilestoneStatusAsync(current, e.Value?.ToString())">
+                                    @foreach (var s in Enum.GetValues<ProjectMilestoneStatus>())
+                                    {
+                                        <option value="@s">@s</option>
+                                    }
+                                </select>
+                            </td>
+                            <td>@(current.CustomerApprovalRequired ? (current.CustomerApproved ? "Approved" : "Pending") : "—")</td>
+                            <td><button class="btn ghost danger" type="button" disabled="@_busy" @onclick="() => DeleteMilestoneAsync(current.Id)">Delete</button></td>
+                        </tr>
+                    }
+                    </tbody>
+                </table></div>
+            }
+        </div>
+    };
+
+    private Task AddPhaseAsync() => RunAsync(async () =>
+    {
+        await Projects.CreatePhaseAsync(Id, _phaseDraft);
+        _phaseDraft = new ProjectPhase();
+    }, "Phase added.");
+
+    private Task AddMilestoneAsync() => RunAsync(async () =>
+    {
+        _milestoneDraft.PlannedDate = _milestoneDate;
+        await Projects.CreateMilestoneAsync(Id, _milestoneDraft);
+        _milestoneDraft = new ProjectMilestone();
+        _milestoneDate = DateTime.UtcNow.Date.AddDays(14);
+    }, "Milestone added.");
+
+    private Task ChangeMilestoneStatusAsync(ProjectMilestone milestone, string? raw) => RunAsync(async () =>
+    {
+        if (!Enum.TryParse<ProjectMilestoneStatus>(raw, out var status)) return;
+        await Projects.UpdateMilestoneAsync(milestone.Id, new ProjectMilestone
+        {
+            Name = milestone.Name,
+            Description = milestone.Description,
+            PhaseId = milestone.PhaseId,
+            OwnerUserId = milestone.OwnerUserId,
+            PlannedDate = milestone.PlannedDate,
+            ActualCompletionDate = milestone.ActualCompletionDate,
+            MilestoneStatus = status,
+            ProgressPercent = status == ProjectMilestoneStatus.Completed ? 100 : milestone.ProgressPercent,
+            CustomerApprovalRequired = milestone.CustomerApprovalRequired,
+            CustomerApproved = milestone.CustomerApproved,
+            Notes = milestone.Notes
+        });
+    });
+
+    private Task DeleteMilestoneAsync(int milestoneId) => RunAsync(
+        async () => await Projects.DeleteMilestoneAsync(milestoneId), "Milestone deleted.");
+
+    // ————————————————— Team —————————————————
+
+    private RenderFragment TeamTab => __builder =>
+    {
+        <div class="stack">
+        <div class="panel">
+            <h2>Add team member</h2>
+            <div class="form-grid">
+                <label>User
+                    <select value="@_memberUserId" @onchange="e => _memberUserId = e.Value?.ToString() ?? string.Empty">
+                        <option value="">— Select user —</option>
+                        @foreach (var u in _users.Where(u => _members.All(m => m.UserId != u.Id)))
+                        {
+                            <option value="@u.Id">@ProjectDisplay.UserName(u)</option>
+                        }
+                    </select>
+                </label>
+                <label>Role<input value="@_memberRole" @onchange="e => _memberRole = e.Value?.ToString() ?? string.Empty" /></label>
+            </div>
+            <div class="form-actions">
+                <button class="btn" type="button" disabled="@_busy" @onclick="AddMemberAsync">Add member</button>
+            </div>
+        </div>
+
+        @if (_members.Count == 0)
+        {
+            <p class="muted">No team members assigned yet.</p>
+        }
+        else
+        {
+            <div class="table-wrap"><table class="data-table">
+                <thead><tr><th>Member</th><th>Role</th><th class="num">Allocation</th><th>From</th><th>To</th><th></th></tr></thead>
+                <tbody>
+                @foreach (var m in _members)
+                {
+                    var current = m;
+                    <tr>
+                        <td>@ProjectDisplay.UserName(current.User)</td>
+                        <td>@current.ProjectRole</td>
+                        <td class="num mono">@current.AllocationPercent.ToString("N0")%</td>
+                        <td>@ProjectDisplay.Date(current.StartDate)</td>
+                        <td>@ProjectDisplay.Date(current.EndDate)</td>
+                        <td><button class="btn ghost danger" type="button" disabled="@_busy" @onclick="() => RemoveMemberAsync(current.Id)">Remove</button></td>
+                    </tr>
+                }
+                </tbody>
+            </table></div>
+        }
+        </div>
+    };
+
+    private Task AddMemberAsync() => RunAsync(async () =>
+    {
+        if (!int.TryParse(_memberUserId, out var userId) || userId <= 0)
+            throw new InvalidOperationException("Select a user.");
+        await Projects.AddMemberAsync(Id, new ProjectMember { UserId = userId, ProjectRole = _memberRole });
+        _memberUserId = ""; _memberRole = "Member";
+    }, "Member added.");
+
+    private Task RemoveMemberAsync(int memberId) => RunAsync(
+        async () => await Projects.RemoveMemberAsync(memberId), "Member removed.");
+
+    // ————————————————— Issues —————————————————
+
+    private RenderFragment IssuesTab => __builder =>
+    {
+        <div class="stack">
+        <div class="panel">
+            <h2>Raise issue</h2>
+            <div class="form-grid">
+                <label>Title<input value="@_issueDraft.Title" @onchange="e => _issueDraft.Title = e.Value?.ToString() ?? string.Empty" /></label>
+                <label>Severity
+                    <select value="@_issueDraft.Severity"
+                            @onchange="e => _issueDraft.Severity = Enum.TryParse<ProjectIssueSeverity>(e.Value?.ToString(), out var v) ? v : ProjectIssueSeverity.Medium">
+                        @foreach (var s in Enum.GetValues<ProjectIssueSeverity>())
+                        {
+                            <option value="@s">@s</option>
+                        }
+                    </select>
+                </label>
+                <label>Owner
+                    <select value="@(_issueDraft.OwnerUserId?.ToString() ?? "")"
+                            @onchange="e => _issueDraft.OwnerUserId = int.TryParse(e.Value?.ToString(), out var v) ? v : null">
+                        <option value="">— Unassigned —</option>
+                        @foreach (var u in _users)
+                        {
+                            <option value="@u.Id">@ProjectDisplay.UserName(u)</option>
+                        }
+                    </select>
+                </label>
+                <label>Target resolution
+                    <input type="date" value="@(_issueDraft.TargetResolutionDate?.ToString("yyyy-MM-dd"))"
+                           @onchange="e => _issueDraft.TargetResolutionDate = DateTime.TryParse(e.Value?.ToString(), out var d) ? d.Date : null" />
+                </label>
+                <label class="span-2">Description
+                    <textarea rows="2" value="@_issueDraft.Description" @onchange="e => _issueDraft.Description = e.Value?.ToString()"></textarea>
+                </label>
+            </div>
+            <div class="form-actions">
+                <button class="btn" type="button" disabled="@_busy" @onclick="AddIssueAsync">Log issue</button>
+            </div>
+        </div>
+
+        @if (_issues.Count == 0)
+        {
+            <p class="muted">No issues logged.</p>
+        }
+        else
+        {
+            <div class="table-wrap"><table class="data-table">
+                <thead><tr><th>Number</th><th>Title</th><th>Severity</th><th>Owner</th><th>Raised</th><th>Target</th><th>Status</th></tr></thead>
+                <tbody>
+                @foreach (var i in _issues)
+                {
+                    var current = i;
+                    <tr>
+                        <td class="mono">@current.IssueNumber</td>
+                        <td>@current.Title</td>
+                        <td><span class="pill @(current.Severity >= ProjectIssueSeverity.High ? "off" : "")">@current.Severity</span></td>
+                        <td>@ProjectDisplay.UserName(current.OwnerUser)</td>
+                        <td>@current.DateRaised.ToString("yyyy-MM-dd")</td>
+                        <td>@ProjectDisplay.Date(current.TargetResolutionDate)</td>
+                        <td>
+                            <select value="@current.IssueStatus" disabled="@_busy"
+                                    @onchange="e => ChangeIssueStatusAsync(current, e.Value?.ToString())">
+                                @foreach (var s in Enum.GetValues<ProjectIssueStatus>())
+                                {
+                                    <option value="@s">@s</option>
+                                }
+                            </select>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table></div>
+        }
+        </div>
+    };
+
+    private Task AddIssueAsync() => RunAsync(async () =>
+    {
+        _issueDraft.ProjectId = Id;
+        await Projects.CreateIssueAsync(_issueDraft);
+        _issueDraft = new Issue();
+    }, "Issue logged.");
+
+    private Task ChangeIssueStatusAsync(Issue issue, string? raw) => RunAsync(async () =>
+    {
+        if (!Enum.TryParse<ProjectIssueStatus>(raw, out var status)) return;
+        await Projects.UpdateIssueAsync(issue.Id, new Issue
+        {
+            Title = issue.Title,
+            Description = issue.Description,
+            Type = issue.Type,
+            Severity = issue.Severity,
+            Priority = issue.Priority,
+            IssueStatus = status,
+            OwnerUserId = issue.OwnerUserId,
+            TargetResolutionDate = issue.TargetResolutionDate,
+            RootCause = issue.RootCause,
+            Resolution = issue.Resolution,
+            DueDate = issue.DueDate
+        });
+    });
+
+    // ————————————————— Risks —————————————————
+
+    private RenderFragment RisksTab => __builder =>
+    {
+        <div class="stack">
+        <div class="panel">
+            <h2>Register risk</h2>
+            <div class="form-grid">
+                <label class="span-2">Description
+                    <input value="@_riskDraft.Description" @onchange="e => _riskDraft.Description = e.Value?.ToString() ?? string.Empty" />
+                </label>
+                <label>Probability (1-5)
+                    <input type="number" min="1" max="5" value="@_riskDraft.Probability"
+                           @onchange="e => _riskDraft.Probability = int.TryParse(e.Value?.ToString(), out var v) ? v : 1" />
+                </label>
+                <label>Impact (1-5)
+                    <input type="number" min="1" max="5" value="@_riskDraft.Impact"
+                           @onchange="e => _riskDraft.Impact = int.TryParse(e.Value?.ToString(), out var v) ? v : 1" />
+                </label>
+                <label>Owner
+                    <select value="@(_riskDraft.OwnerUserId?.ToString() ?? "")"
+                            @onchange="e => _riskDraft.OwnerUserId = int.TryParse(e.Value?.ToString(), out var v) ? v : null">
+                        <option value="">— Unassigned —</option>
+                        @foreach (var u in _users)
+                        {
+                            <option value="@u.Id">@ProjectDisplay.UserName(u)</option>
+                        }
+                    </select>
+                </label>
+                <label class="span-2">Mitigation plan
+                    <textarea rows="2" value="@_riskDraft.MitigationPlan" @onchange="e => _riskDraft.MitigationPlan = e.Value?.ToString()"></textarea>
+                </label>
+            </div>
+            <div class="form-actions">
+                <button class="btn" type="button" disabled="@_busy" @onclick="AddRiskAsync">Add risk</button>
+            </div>
+        </div>
+
+        @if (_risks.Count == 0)
+        {
+            <p class="muted">No risks registered.</p>
+        }
+        else
+        {
+            <div class="table-wrap"><table class="data-table">
+                <thead><tr><th>Number</th><th>Description</th><th class="num">P</th><th class="num">I</th><th class="num">Score</th><th>Owner</th><th>Status</th></tr></thead>
+                <tbody>
+                @foreach (var r in _risks)
+                {
+                    var current = r;
+                    <tr>
+                        <td class="mono">@current.RiskNumber</td>
+                        <td>@current.Description</td>
+                        <td class="num">@current.Probability</td>
+                        <td class="num">@current.Impact</td>
+                        <td class="num"><span class="pill @(current.RiskScore >= 15 ? "off" : current.RiskScore >= 8 ? "warn" : "")">@current.RiskScore</span></td>
+                        <td>@ProjectDisplay.UserName(current.OwnerUser)</td>
+                        <td>
+                            <select value="@current.RiskStatus" disabled="@_busy"
+                                    @onchange="e => ChangeRiskStatusAsync(current, e.Value?.ToString())">
+                                @foreach (var s in Enum.GetValues<ProjectRiskStatus>())
+                                {
+                                    <option value="@s">@s</option>
+                                }
+                            </select>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table></div>
+        }
+        </div>
+    };
+
+    private Task AddRiskAsync() => RunAsync(async () =>
+    {
+        _riskDraft.ProjectId = Id;
+        await Projects.CreateRiskAsync(_riskDraft);
+        _riskDraft = new ProjectRisk();
+    }, "Risk registered.");
+
+    private Task ChangeRiskStatusAsync(ProjectRisk risk, string? raw) => RunAsync(async () =>
+    {
+        if (!Enum.TryParse<ProjectRiskStatus>(raw, out var status)) return;
+        await Projects.UpdateRiskAsync(risk.Id, new ProjectRisk
+        {
+            Description = risk.Description,
+            Probability = risk.Probability,
+            Impact = risk.Impact,
+            OwnerUserId = risk.OwnerUserId,
+            MitigationPlan = risk.MitigationPlan,
+            ContingencyPlan = risk.ContingencyPlan,
+            RiskStatus = status,
+            ReviewDate = risk.ReviewDate
+        });
+    });
+
+    // ————————————————— Change requests —————————————————
+
+    private RenderFragment ChangesTab => __builder =>
+    {
+        <div class="stack">
+        <div class="panel">
+            <h2>New change request</h2>
+            <div class="form-grid">
+                <label class="span-2">Description
+                    <input value="@_changeDraft.Description" @onchange="e => _changeDraft.Description = e.Value?.ToString() ?? string.Empty" />
+                </label>
+                <label>Requested by<input value="@_changeDraft.RequestedBy" @onchange="e => _changeDraft.RequestedBy = e.Value?.ToString()" /></label>
+                <label>Priority
+                    <select value="@_changeDraft.Priority"
+                            @onchange="e => _changeDraft.Priority = Enum.TryParse<ProjectPriority>(e.Value?.ToString(), out var v) ? v : ProjectPriority.Medium">
+                        @foreach (var p in Enum.GetValues<ProjectPriority>())
+                        {
+                            <option value="@p">@p</option>
+                        }
+                    </select>
+                </label>
+                <label>Estimated hours
+                    <input type="number" step="0.5" min="0" value="@_changeDraft.EstimatedHours"
+                           @onchange="e => _changeDraft.EstimatedHours = decimal.TryParse(e.Value?.ToString(), out var v) ? v : 0" />
+                </label>
+                <label>Estimated cost
+                    <input type="number" step="0.01" min="0" value="@_changeDraft.EstimatedCost"
+                           @onchange="e => _changeDraft.EstimatedCost = decimal.TryParse(e.Value?.ToString(), out var v) ? v : 0" />
+                </label>
+                <label class="span-2">Business reason
+                    <textarea rows="2" value="@_changeDraft.BusinessReason" @onchange="e => _changeDraft.BusinessReason = e.Value?.ToString()"></textarea>
+                </label>
+            </div>
+            <div class="form-actions">
+                <button class="btn" type="button" disabled="@_busy" @onclick="AddChangeAsync">Submit change request</button>
+            </div>
+        </div>
+
+        @if (_changes.Count == 0)
+        {
+            <p class="muted">No change requests raised.</p>
+        }
+        else
+        {
+            <div class="table-wrap"><table class="data-table">
+                <thead><tr><th>Number</th><th>Description</th><th>Requested</th><th class="num">Hours</th><th class="num">Cost</th><th>Status</th><th></th></tr></thead>
+                <tbody>
+                @foreach (var c in _changes)
+                {
+                    var current = c;
+                    <tr>
+                        <td class="mono">@current.ChangeRequestNumber</td>
+                        <td>@current.Description</td>
+                        <td>@current.RequestedDate.ToString("yyyy-MM-dd")</td>
+                        <td class="num mono">@current.EstimatedHours.ToString("N1")</td>
+                        <td class="num mono">@current.EstimatedCost.ToString("N2")</td>
+                        <td><span class="pill @ProjectDisplay.ChangeRequestStatusClass(current.ApprovalStatus)">@current.ApprovalStatus</span></td>
+                        <td class="inline-actions">
+                            @if (current.ApprovalStatus is not ChangeRequestApprovalStatus.Approved
+                                 and not ChangeRequestApprovalStatus.Rejected
+                                 and not ChangeRequestApprovalStatus.Implemented)
+                            {
+                                <button class="btn ghost" type="button" disabled="@_busy" @onclick="() => DecideChangeAsync(current.Id, true)">Approve</button>
+                                <button class="btn ghost danger" type="button" disabled="@_busy" @onclick="() => DecideChangeAsync(current.Id, false)">Reject</button>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table></div>
+        }
+        </div>
+    };
+
+    private Task AddChangeAsync() => RunAsync(async () =>
+    {
+        _changeDraft.ProjectId = Id;
+        _changeDraft.ApprovalStatus = ChangeRequestApprovalStatus.Submitted;
+        await Projects.CreateChangeRequestAsync(_changeDraft);
+        _changeDraft = new ProjectChangeRequest();
+    }, "Change request submitted.");
+
+    private Task DecideChangeAsync(int id, bool approved) => RunAsync(
+        async () => await Projects.ApproveChangeRequestAsync(id, approved),
+        approved ? "Change request approved." : "Change request rejected.");
+
+    // ————————————————— Timesheets —————————————————
+
+    private RenderFragment TimesheetsTab => __builder =>
+    {
+        <div class="panel">
+            <h2>Logged time</h2>
+            @if (_timesheets.Count == 0)
+            {
+                <p class="muted">No time logged for this project. <a href="/projects/timesheets">Log time</a>.</p>
+            }
+            else
+            {
+                <div class="table-wrap"><table class="data-table">
+                    <thead><tr><th>Date</th><th>User</th><th>Task</th><th class="num">Hours</th><th class="num">Billable</th><th>Status</th><th></th></tr></thead>
+                    <tbody>
+                    @foreach (var t in _timesheets)
+                    {
+                        var current = t;
+                        <tr>
+                            <td>@current.WorkDate.ToString("yyyy-MM-dd")</td>
+                            <td>@ProjectDisplay.UserName(current.User)</td>
+                            <td>@(current.Task?.Name ?? "—")</td>
+                            <td class="num mono">@current.Hours.ToString("N2")</td>
+                            <td class="num mono">@current.BillableHours.ToString("N2")</td>
+                            <td><span class="pill @ProjectDisplay.TimesheetStatusClass(current.EntryStatus)">@current.EntryStatus</span></td>
+                            <td class="inline-actions">
+                                @if (current.EntryStatus == TimesheetEntryStatus.Submitted)
+                                {
+                                    <button class="btn ghost" type="button" disabled="@_busy" @onclick="() => ApproveTimeAsync(current.Id)">Approve</button>
+                                    <button class="btn ghost danger" type="button" disabled="@_busy" @onclick="() => RejectTimeAsync(current.Id)">Reject</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table></div>
+                <p class="muted">
+                    Total @_timesheets.Sum(t => t.Hours).ToString("N2") h ·
+                    approved @_timesheets.Where(t => t.EntryStatus == TimesheetEntryStatus.Approved).Sum(t => t.Hours).ToString("N2") h
+                </p>
+            }
+        </div>
+    };
+
+    private Task ApproveTimeAsync(int id) => RunAsync(
+        async () => await Projects.ApproveTimesheetAsync(id), "Entry approved.");
+
+    private Task RejectTimeAsync(int id) => RunAsync(
+        async () => await Projects.RejectTimesheetAsync(id), "Entry rejected.");
+
+    // ————————————————— Activity —————————————————
+
+    private RenderFragment ActivityTab => __builder =>
+    {
+        <div class="panel">
+            <h2>Discussion</h2>
+            <div class="form-grid">
+                <label class="span-2">Comment
+                    <textarea rows="3" value="@_commentBody" @onchange="e => _commentBody = e.Value?.ToString() ?? string.Empty"></textarea>
+                </label>
+            </div>
+            <div class="form-actions">
+                <button class="btn" type="button" disabled="@_busy" @onclick="AddCommentAsync">Post comment</button>
+            </div>
+
+            @if (_comments.Count == 0)
+            {
+                <p class="muted">No comments yet.</p>
+            }
+            else
+            {
+                <ul class="list-plain">
+                    @foreach (var c in _comments)
+                    {
+                        <li>
+                            <strong>@ProjectDisplay.UserName(c.AuthorUser)</strong>
+                            <span class="muted"> · @c.CreatedDate.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</span>
+                            <div>@c.Body</div>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+
+        <div class="panel">
+            <h2>Attachments</h2>
+            <p class="muted">Max 10 MB · pdf, png, jpg, jpeg, gif, docx, xlsx, txt, csv, zip</p>
+            <InputFile OnChange="UploadAsync" disabled="@_busy" />
+
+            @if (_attachments.Count == 0)
+            {
+                <p class="muted">No files attached.</p>
+            }
+            else
+            {
+                <div class="table-wrap"><table class="data-table">
+                    <thead><tr><th>File</th><th>Uploaded by</th><th>When</th><th class="num">Size</th><th></th></tr></thead>
+                    <tbody>
+                    @foreach (var a in _attachments)
+                    {
+                        var current = a;
+                        <tr>
+                            <td><a href="@($"/projects/attachments/{current.Id}")" target="_blank">@current.FileName</a></td>
+                            <td>@ProjectDisplay.UserName(current.UploadedByUser)</td>
+                            <td>@current.CreatedDate.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                            <td class="num mono">@((current.FileSizeBytes / 1024d).ToString("N0")) KB</td>
+                            <td><button class="btn ghost danger" type="button" disabled="@_busy" @onclick="() => DeleteAttachmentAsync(current.Id)">Delete</button></td>
+                        </tr>
+                    }
+                    </tbody>
+                </table></div>
+            }
+        </div>
+    };
+
+    private Task AddCommentAsync() => RunAsync(async () =>
+    {
+        await Projects.AddCommentAsync(ProjectCommentEntityType.Project, Id, Id, _commentBody);
+        _commentBody = "";
+    }, "Comment posted.");
+
+    private async Task UploadAsync(InputFileChangeEventArgs e)
+    {
+        const long maxBytes = 10 * 1024 * 1024;
+        await RunAsync(async () =>
+        {
+            var file = e.File;
+            if (file is null) return;
+            if (file.Size > maxBytes) throw new InvalidOperationException("File exceeds the 10 MB limit.");
+
+            using var stream = file.OpenReadStream(maxBytes);
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+
+            await Projects.UploadAttachmentAsync(new ProjectAttachmentUpload
+            {
+                EntityType = ProjectCommentEntityType.Project,
+                EntityId = Id,
+                ProjectId = Id,
+                FileName = file.Name,
+                ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
+                Content = buffer.ToArray()
+            });
+        }, "File uploaded.");
+    }
+
+    private Task DeleteAttachmentAsync(int id) => RunAsync(
+        async () => await Projects.DeleteAttachmentAsync(id), "File deleted.");
+}

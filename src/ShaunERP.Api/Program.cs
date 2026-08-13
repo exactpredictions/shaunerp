@@ -2,11 +2,17 @@ using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using ShaunERP.Core.ImportExport;
+using ShaunERP.Core.Platform;
 using ShaunERP.Infrastructure;
 using ShaunERP.Infrastructure.Platform;
 using ShaunERP.Infrastructure.Services;
+using ShaunERP.Infrastructure.Services.ImportExport;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Configuration["Storage:ProjectFilesRoot"] ??=
+    Path.Combine(builder.Environment.ContentRootPath, "App_Data", "project-files");
 
 builder.Services.AddInfrastructure(builder.Configuration);
 
@@ -31,39 +37,62 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c =>
+
+var enableSwagger =
+    builder.Environment.IsDevelopment()
+    || string.Equals(builder.Configuration["ENABLE_SWAGGER"], "true", StringComparison.OrdinalIgnoreCase);
+var disableSwagger = string.Equals(
+    builder.Configuration["DISABLE_SWAGGER"], "true", StringComparison.OrdinalIgnoreCase);
+if (enableSwagger && !disableSwagger)
 {
-    c.SwaggerDoc("v1", new OpenApiInfo
+    builder.Services.AddSwaggerGen(c =>
     {
-        Title = "ShaunERP API",
-        Version = "v1",
-        Description = "Open-source ERP MVP — Auth, CRM, Finance"
-    });
-    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-    {
-        Description = "JWT Authorization header using the Bearer scheme.",
-        Name = "Authorization",
-        In = ParameterLocation.Header,
-        Type = SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT"
-    });
-    c.AddSecurityRequirement(new OpenApiSecurityRequirement
-    {
+        c.SwaggerDoc("v1", new OpenApiInfo
         {
-            new OpenApiSecurityScheme
+            Title = "ShaunERP API",
+            Version = "v1",
+            Description = "Open-source ERP MVP — Auth, CRM, Finance"
+        });
+        c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+        {
+            Description = "JWT Authorization header using the Bearer scheme.",
+            Name = "Authorization",
+            In = ParameterLocation.Header,
+            Type = SecuritySchemeType.Http,
+            Scheme = "bearer",
+            BearerFormat = "JWT"
+        });
+        c.AddSecurityRequirement(new OpenApiSecurityRequirement
+        {
             {
-                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
-            },
-            Array.Empty<string>()
-        }
+                new OpenApiSecurityScheme
+                {
+                    Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
+                },
+                Array.Empty<string>()
+            }
+        });
     });
-});
+}
+
+var corsOrigins = builder.Configuration.GetSection("Jwt:Cors:Origins").Get<string[]>()
+    ?? builder.Configuration.GetSection("Cors:Origins").Get<string[]>()
+    ?? ["https://erp.shauninfomedia.com"];
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll", policy =>
-        policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+    if (builder.Environment.IsDevelopment())
+    {
+        options.AddPolicy("AllowAll", policy =>
+            policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+    }
+    else
+    {
+        options.AddPolicy("AllowAll", policy =>
+            policy.WithOrigins(corsOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod());
+    }
 });
 
 var app = builder.Build();
@@ -74,9 +103,7 @@ using (var scope = app.Services.CreateScope())
     await seeder.SeedAsync();
 }
 
-var disableSwagger = string.Equals(
-    builder.Configuration["DISABLE_SWAGGER"], "true", StringComparison.OrdinalIgnoreCase);
-if (!disableSwagger)
+if (enableSwagger && !disableSwagger)
 {
     app.UseSwagger();
     app.UseSwaggerUI();
@@ -106,6 +133,53 @@ app.Use(async (context, next) =>
 app.MapControllers();
 app.MapGet("/health", () => Results.Ok(new { status = "ok", product = "ShaunERP", time = DateTime.UtcNow }));
 
+// One-shot production bootstrap (disabled unless BOOTSTRAP_TOKEN is configured).
+var bootstrapToken = builder.Configuration["BOOTSTRAP_TOKEN"]
+    ?? Environment.GetEnvironmentVariable("BOOTSTRAP_TOKEN");
+if (!string.IsNullOrWhiteSpace(bootstrapToken))
+{
+    app.MapPost("/internal/bootstrap-users", async (
+        HttpRequest request,
+        IProductionUserBootstrapService bootstrap,
+        ProductionUserBootstrapRequest body) =>
+    {
+        if (!request.Headers.TryGetValue("X-Bootstrap-Token", out var provided)
+            || !string.Equals(provided.ToString(), bootstrapToken, StringComparison.Ordinal))
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await bootstrap.BootstrapUsersAsync(body);
+        return result.Success ? Results.Ok(result) : Results.BadRequest(result);
+    });
+
+    app.MapPost("/internal/production-init", async (
+        HttpRequest request,
+        IProductionInitializationService init,
+        ITenantContext tenant) =>
+    {
+        if (!request.Headers.TryGetValue("X-Bootstrap-Token", out var provided)
+            || !string.Equals(provided.ToString(), bootstrapToken, StringComparison.Ordinal))
+        {
+            return Results.Unauthorized();
+        }
+
+        tenant.Set(new TenantContextSnapshot
+        {
+            UserId = 1,
+            IsSystemAdmin = true,
+            CompanyId = null,
+            CompanyName = null,
+            Permissions = Permissions.AdminDefaults.ToHashSet(StringComparer.OrdinalIgnoreCase),
+            Entitlements = ModuleCatalog.All.Select(m => m.Key).ToHashSet(StringComparer.OrdinalIgnoreCase)
+        });
+
+        var initialized = await init.InitializeProductionDatasetAsync();
+        var removed = await init.RemoveDemoDataAsync();
+        return Results.Ok(new { initialized, removed });
+    });
+}
+
 app.MapGet("/", () => Results.Content(
     """
     <!DOCTYPE html>
@@ -113,7 +187,7 @@ app.MapGet("/", () => Results.Content(
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
-      <title>ShaunERP Demo</title>
+      <title>ShaunERP API</title>
       <style>
         :root { color-scheme: light; }
         body { margin: 0; font-family: "IBM Plex Sans", system-ui, sans-serif; background: #f4f6f8; color: #1c2430; }
@@ -132,11 +206,11 @@ app.MapGet("/", () => Results.Content(
     </head>
     <body>
       <main>
-        <h1>ShaunERP</h1>
-        <p>Public demo API for Shaun Infomedia. Explore endpoints in Swagger, or check service health.</p>
+        <h1>ShaunERP API</h1>
+        <p>Operational API for Shaun Infomedia OPC Private Limited. Use the Blazor web app at erp.shauninfomedia.com for interactive access.</p>
         <div class="links">
-          <a href="/swagger">Open Swagger</a>
           <a class="secondary" href="/health">Health</a>
+          <a class="secondary" href="https://erp.shauninfomedia.com/">ERP Web</a>
           <a class="secondary" href="https://shauninfomedia.com/">Company site</a>
         </div>
       </main>

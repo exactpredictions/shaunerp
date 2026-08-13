@@ -228,15 +228,86 @@ public static class ModuleCatalog
         {
             Key = ModuleKeys.Projects,
             Name = "Projects",
-            Description = "Projects, issues, and delivery tracking",
+            Description = "Project delivery: plans, tasks, kanban, timesheets, issues, risks, and change control",
             Category = ModuleCategory.ProjectsAndServices,
             BaseRoute = "/projects",
             DashboardRoute = "/projects",
             Icon = "projects",
             RequiredEntitlement = ModuleKeys.Projects,
+            RequiredPermission = Permissions.ProjectsAccess,
             DisplayOrder = 50,
-            IsPlaceholder = true,
-            IsEnabled = false
+            IsPlaceholder = false,
+            IsEnabled = true,
+            Dependencies = [ModuleKeys.Crm],
+            Permissions =
+            [
+                Permissions.ProjectsAccess, Permissions.ProjectsDashboardView,
+                Permissions.ProjectsView, Permissions.ProjectsViewAll,
+                Permissions.ProjectsCreate, Permissions.ProjectsUpdate,
+                Permissions.ProjectsDelete, Permissions.ProjectsArchive,
+                Permissions.ProjectsTasksView, Permissions.ProjectsTasksCreate,
+                Permissions.ProjectsTasksUpdate, Permissions.ProjectsTasksAssign, Permissions.ProjectsTasksDelete,
+                Permissions.ProjectsTimesheetsCreate, Permissions.ProjectsTimesheetsSubmit, Permissions.ProjectsTimesheetsApprove,
+                Permissions.ProjectsBudgetView, Permissions.ProjectsBudgetEdit, Permissions.ProjectsFinancialsView,
+                Permissions.ProjectsIssuesManage, Permissions.ProjectsRisksManage,
+                Permissions.ProjectsChangeRequestsCreate, Permissions.ProjectsChangeRequestsApprove,
+                Permissions.ProjectsTemplatesManage
+            ],
+            NavigationItems =
+            [
+                new ModuleNavItem { Key = "projects.dashboard", Title = "Dashboard", Route = "/projects", Icon = "dashboard", RequiredPermission = Permissions.ProjectsDashboardView, Group = "Overview", Order = 1 },
+                new ModuleNavItem { Key = "projects.list", Title = "Projects", Route = "/projects/list", Icon = "projects", RequiredPermission = Permissions.ProjectsView, Group = "Delivery", Order = 2 },
+                new ModuleNavItem { Key = "projects.new", Title = "New project", Route = "/projects/new", Icon = "project-plus", RequiredPermission = Permissions.ProjectsCreate, Group = "Delivery", Order = 3 },
+                new ModuleNavItem { Key = "projects.tasks", Title = "Task list", Route = "/projects/tasks", Icon = "task", RequiredPermission = Permissions.ProjectsTasksView, Group = "Execution", Order = 4 },
+                new ModuleNavItem { Key = "projects.kanban", Title = "Kanban", Route = "/projects/kanban", Icon = "board", RequiredPermission = Permissions.ProjectsTasksView, Group = "Execution", Order = 5 },
+                new ModuleNavItem { Key = "projects.my-work", Title = "My Work", Route = "/projects/my-work", Icon = "user-task", RequiredPermission = Permissions.ProjectsTasksView, Group = "Execution", Order = 6 },
+                new ModuleNavItem { Key = "projects.timesheets", Title = "Timesheets", Route = "/projects/timesheets", Icon = "clock", RequiredPermission = Permissions.ProjectsTimesheetsCreate, Group = "Time", Order = 7 },
+                new ModuleNavItem { Key = "projects.templates", Title = "Templates", Route = "/projects/templates", Icon = "template", RequiredPermission = Permissions.ProjectsTemplatesManage, Group = "Setup", Order = 8 }
+            ]
+        },
+        new ModuleDefinition
+        {
+            Key = ModuleKeys.Settings,
+            Name = "Settings",
+            Description = "Company configuration, import/export, and production initialization",
+            Category = ModuleCategory.Administration,
+            BaseRoute = "/settings",
+            DashboardRoute = "/settings/company-configuration",
+            Icon = "settings",
+            RequiredEntitlement = ModuleKeys.Settings,
+            RequiredPermission = Permissions.SettingsCompanyConfigManage,
+            DisplayOrder = 90,
+            IsPlaceholder = false,
+            IsEnabled = true,
+            Permissions =
+            [
+                Permissions.SettingsCompanyConfigManage,
+                Permissions.SettingsImportExport,
+                Permissions.SettingsProductionInit
+            ],
+            NavigationItems =
+            [
+                new ModuleNavItem
+                {
+                    Key = "settings.company-configuration",
+                    Title = "Company configuration",
+                    Route = "/settings/company-configuration",
+                    Icon = "company",
+                    RequiredPermission = Permissions.SettingsCompanyConfigManage,
+                    Group = "Configuration",
+                    Order = 1
+                },
+                new ModuleNavItem
+                {
+                    Key = "settings.production-initialization",
+                    Title = "Production initialization",
+                    Route = "/settings/production-initialization",
+                    Icon = "init",
+                    RequiredPermission = Permissions.SettingsProductionInit,
+                    Group = "Operations",
+                    Order = 2
+                }
+            ]
         },
         new ModuleDefinition
         {

@@ -1,0 +1,3 @@
+InvoiceNumber,CustomerAccountNumber,InvoiceDate,DueDate,CurrencyCode,PaymentTerms,Notes,GrandTotal
+SAMPLE-INV-001,SAMPLE-CUST-001,2026-04-01,2026-04-30,INR,Net 30,SAMPLE header import,1180.00
+SAMPLE-INV-002,SAMPLE-CUST-002,2026-04-05,,INR,,,590.00

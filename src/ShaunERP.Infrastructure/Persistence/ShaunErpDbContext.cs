@@ -88,6 +88,23 @@ public class ShaunErpDbContext : DbContext
     // Projects
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<Issue> Issues => Set<Issue>();
+    public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
+    public DbSet<ProjectPhase> ProjectPhases => Set<ProjectPhase>();
+    public DbSet<ProjectMilestone> ProjectMilestones => Set<ProjectMilestone>();
+    public DbSet<ProjectTask> ProjectTasks => Set<ProjectTask>();
+    public DbSet<ProjectTaskCollaborator> ProjectTaskCollaborators => Set<ProjectTaskCollaborator>();
+    public DbSet<ProjectTaskChecklistItem> ProjectTaskChecklistItems => Set<ProjectTaskChecklistItem>();
+    public DbSet<ProjectTaskDependency> ProjectTaskDependencies => Set<ProjectTaskDependency>();
+    public DbSet<ProjectRisk> ProjectRisks => Set<ProjectRisk>();
+    public DbSet<ProjectChangeRequest> ProjectChangeRequests => Set<ProjectChangeRequest>();
+    public DbSet<ProjectTimesheet> ProjectTimesheets => Set<ProjectTimesheet>();
+    public DbSet<ProjectTimeTracker> ProjectTimeTrackers => Set<ProjectTimeTracker>();
+    public DbSet<ProjectComment> ProjectComments => Set<ProjectComment>();
+    public DbSet<ProjectAttachment> ProjectAttachments => Set<ProjectAttachment>();
+    public DbSet<ProjectTemplate> ProjectTemplates => Set<ProjectTemplate>();
+    public DbSet<ProjectTemplatePhase> ProjectTemplatePhases => Set<ProjectTemplatePhase>();
+    public DbSet<ProjectTemplateTask> ProjectTemplateTasks => Set<ProjectTemplateTask>();
+    public DbSet<ProjectNumberSequence> ProjectNumberSequences => Set<ProjectNumberSequence>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -200,6 +217,7 @@ public class ShaunErpDbContext : DbContext
             .Ignore(x => x.LineNet);
 
         ConfigureAccounting(modelBuilder);
+        ConfigureProjects(modelBuilder);
 
         modelBuilder.Entity<Lead>()
             .Property(x => x.AnnualRevenue)
@@ -417,6 +435,141 @@ public class ShaunErpDbContext : DbContext
 
         modelBuilder.Entity<InventoryItem>()
             .HasIndex(x => new { x.CompanyId, x.ItemCode })
+            .IsUnique();
+    }
+
+    private static void ConfigureProjects(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Project>(e =>
+        {
+            e.Property(x => x.CompanyId).IsRequired();
+            e.HasIndex(x => new { x.CompanyId, x.ProjectCode }).IsUnique();
+            e.HasIndex(x => new { x.CompanyId, x.ProjectStatus });
+            e.HasOne(x => x.Customer).WithMany().HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.Opportunity).WithMany().HasForeignKey(x => x.OpportunityId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.Quote).WithMany().HasForeignKey(x => x.QuoteId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.SalesOrder).WithMany().HasForeignKey(x => x.SalesOrderId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.ManagerUser).WithMany().HasForeignKey(x => x.ManagerUserId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.OwnerUser).WithMany().HasForeignKey(x => x.OwnerUserId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.Template).WithMany().HasForeignKey(x => x.TemplateId).OnDelete(DeleteBehavior.SetNull);
+            e.HasMany(x => x.Members).WithOne(x => x.Project!).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Phases).WithOne(x => x.Project!).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Milestones).WithOne(x => x.Project!).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Tasks).WithOne(x => x.Project!).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Issues).WithOne(x => x.Project!).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Risks).WithOne(x => x.Project!).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.ChangeRequests).WithOne(x => x.Project!).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Timesheets).WithOne(x => x.Project!).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectMember>(e =>
+        {
+            e.HasIndex(x => new { x.CompanyId, x.ProjectId, x.UserId }).IsUnique();
+            e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectPhase>(e =>
+        {
+            e.HasIndex(x => new { x.CompanyId, x.ProjectId });
+            e.HasOne(x => x.OwnerUser).WithMany().HasForeignKey(x => x.OwnerUserId).OnDelete(DeleteBehavior.SetNull);
+            e.HasMany(x => x.Milestones).WithOne(x => x.Phase!).HasForeignKey(x => x.PhaseId).OnDelete(DeleteBehavior.SetNull);
+            e.HasMany(x => x.Tasks).WithOne(x => x.Phase!).HasForeignKey(x => x.PhaseId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ProjectMilestone>(e =>
+        {
+            e.HasIndex(x => new { x.CompanyId, x.ProjectId });
+            e.HasOne(x => x.OwnerUser).WithMany().HasForeignKey(x => x.OwnerUserId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ProjectTask>(e =>
+        {
+            e.HasIndex(x => new { x.CompanyId, x.ProjectId });
+            e.HasIndex(x => new { x.CompanyId, x.TaskStatus });
+            e.HasIndex(x => new { x.CompanyId, x.AssigneeUserId });
+            e.HasIndex(x => new { x.CompanyId, x.DueDate });
+            e.HasIndex(x => new { x.CompanyId, x.TaskNumber }).IsUnique();
+            e.HasOne(x => x.AssigneeUser).WithMany().HasForeignKey(x => x.AssigneeUserId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.Milestone).WithMany().HasForeignKey(x => x.MilestoneId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.ParentTask).WithMany(x => x.Subtasks).HasForeignKey(x => x.ParentTaskId).OnDelete(DeleteBehavior.Restrict);
+            e.HasMany(x => x.ChecklistItems).WithOne(x => x.Task!).HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Collaborators).WithOne(x => x.Task!).HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.DependenciesAsPredecessor).WithOne(x => x.PredecessorTask!)
+                .HasForeignKey(x => x.PredecessorTaskId).OnDelete(DeleteBehavior.Restrict);
+            e.HasMany(x => x.DependenciesAsSuccessor).WithOne(x => x.SuccessorTask!)
+                .HasForeignKey(x => x.SuccessorTaskId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ProjectTaskCollaborator>()
+            .HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ProjectTaskDependency>()
+            .HasIndex(x => new { x.PredecessorTaskId, x.SuccessorTaskId })
+            .IsUnique();
+
+        modelBuilder.Entity<Issue>(e =>
+        {
+            e.HasIndex(x => new { x.CompanyId, x.ProjectId });
+            e.HasIndex(x => new { x.CompanyId, x.IssueNumber });
+            e.HasOne(x => x.OwnerUser).WithMany().HasForeignKey(x => x.OwnerUserId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ProjectRisk>(e =>
+        {
+            e.Ignore(x => x.RiskScore);
+            e.HasIndex(x => new { x.CompanyId, x.ProjectId });
+            e.HasOne(x => x.OwnerUser).WithMany().HasForeignKey(x => x.OwnerUserId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ProjectChangeRequest>(e =>
+        {
+            e.HasIndex(x => new { x.CompanyId, x.ProjectId });
+            e.HasOne(x => x.Customer).WithMany().HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.ApprovedByUser).WithMany().HasForeignKey(x => x.ApprovedByUserId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ProjectTimesheet>(e =>
+        {
+            e.HasIndex(x => new { x.CompanyId, x.UserId, x.WorkDate });
+            e.HasIndex(x => new { x.CompanyId, x.EntryStatus });
+            e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.ApprovedByUser).WithMany().HasForeignKey(x => x.ApprovedByUserId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.Task).WithMany().HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ProjectTimeTracker>(e =>
+        {
+            e.HasIndex(x => new { x.CompanyId, x.UserId, x.IsActive });
+            e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Project).WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Task).WithMany().HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ProjectComment>(e =>
+        {
+            e.HasIndex(x => new { x.CompanyId, x.EntityType, x.EntityId });
+            e.HasOne(x => x.AuthorUser).WithMany().HasForeignKey(x => x.AuthorUserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.ParentComment).WithMany().HasForeignKey(x => x.ParentCommentId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ProjectAttachment>(e =>
+        {
+            e.HasIndex(x => new { x.CompanyId, x.EntityType, x.EntityId });
+            e.HasOne(x => x.UploadedByUser).WithMany().HasForeignKey(x => x.UploadedByUserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectTemplate>(e =>
+        {
+            e.HasIndex(x => new { x.CompanyId, x.Name }).IsUnique();
+            e.HasMany(x => x.Phases).WithOne(x => x.Template!).HasForeignKey(x => x.TemplateId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectTemplatePhase>()
+            .HasMany(x => x.Tasks).WithOne(x => x.TemplatePhase!)
+            .HasForeignKey(x => x.TemplatePhaseId).OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ProjectNumberSequence>()
+            .HasIndex(x => new { x.CompanyId, x.SequenceKey, x.Year })
             .IsUnique();
     }
 

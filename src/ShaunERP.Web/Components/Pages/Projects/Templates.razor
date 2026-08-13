@@ -1,0 +1,204 @@
+@page "/projects/templates"
+@attribute [Authorize]
+@inject IProjectManagementService Projects
+@inject NavigationManager Nav
+
+<PageTitle>Project templates — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">Project Management</p>
+            <h1>Project templates</h1>
+            <p class="muted">Reusable phase and task structures for repeatable delivery.</p>
+        </div>
+        <a class="btn ghost" href="/projects/list">Projects</a>
+    </header>
+
+    @if (_error is not null) { <div class="alert">@_error</div> }
+    @if (_ok is not null) { <div class="ok-msg">@_ok</div> }
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else
+    {
+        <div class="panel">
+            <h2>Existing templates</h2>
+            @if (_templates.Count == 0)
+            {
+                <p class="muted">No templates yet. Create one below.</p>
+            }
+            else
+            {
+                <div class="table-wrap"><table class="data-table">
+                    <thead><tr><th>Name</th><th>Type</th><th>Phases</th><th>Tasks</th><th>New project name</th><th></th></tr></thead>
+                    <tbody>
+                    @foreach (var t in _templates)
+                    {
+                        var tpl = t;
+                        <tr>
+                            <td>@tpl.Name</td>
+                            <td>@(tpl.ProjectType ?? "—")</td>
+                            <td>@tpl.Phases.Count</td>
+                            <td>@tpl.Phases.Sum(p => p.Tasks.Count)</td>
+                            <td>
+                                <input value="@GetNewName(tpl.Id)" placeholder="@tpl.Name project"
+                                       @onchange="e => _newProjectNames[tpl.Id] = e.Value?.ToString() ?? string.Empty" />
+                            </td>
+                            <td class="inline-actions">
+                                <button class="btn ghost" type="button" disabled="@_busy" @onclick="() => CloneAsync(tpl)">Create project</button>
+                                <button class="btn ghost danger" type="button" disabled="@_busy" @onclick="() => DeleteAsync(tpl.Id)">Delete</button>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table></div>
+            }
+        </div>
+
+        <div class="panel">
+            <h2>New template</h2>
+            <div class="form-grid">
+                <label>Name<input value="@_name" @onchange="e => _name = e.Value?.ToString() ?? string.Empty" /></label>
+                <label>Project type<input value="@_type" @onchange="e => _type = e.Value?.ToString()" /></label>
+                <label class="span-2">Description
+                    <textarea rows="2" value="@_description" @onchange="e => _description = e.Value?.ToString()"></textarea>
+                </label>
+            </div>
+
+            <h3 class="form-section">Phases</h3>
+            @for (var i = 0; i < _phases.Count; i++)
+            {
+                var idx = i;
+                <div class="form-grid">
+                    <label>Phase name
+                        <input value="@_phases[idx].Name" @onchange="e => _phases[idx].Name = e.Value?.ToString() ?? string.Empty" />
+                    </label>
+                    <label>Duration (days)
+                        <input type="number" min="0" value="@_phases[idx].DurationDays"
+                               @onchange="e => _phases[idx].DurationDays = int.TryParse(e.Value?.ToString(), out var d) ? d : 0" />
+                    </label>
+                    <label class="span-2">Tasks — one per line, optional <span class="mono">| estimated hours</span>
+                        <textarea rows="3" value="@_phases[idx].TaskLines"
+                                  @onchange="e => _phases[idx].TaskLines = e.Value?.ToString() ?? string.Empty"></textarea>
+                    </label>
+                    <div class="form-actions">
+                        <button class="btn ghost danger" type="button" @onclick="() => _phases.RemoveAt(idx)"
+                                disabled="@(_phases.Count <= 1)">Remove phase</button>
+                    </div>
+                </div>
+            }
+            <div class="form-actions">
+                <button class="btn ghost" type="button" @onclick="() => _phases.Add(new PhaseDraft())">+ Add phase</button>
+                <button class="btn" type="button" @onclick="CreateTemplateAsync" disabled="@_busy">Save template</button>
+            </div>
+        </div>
+    }
+</section>
+
+@code {
+    private sealed class PhaseDraft
+    {
+        public string Name { get; set; } = string.Empty;
+        public int DurationDays { get; set; } = 7;
+        public string TaskLines { get; set; } = string.Empty;
+    }
+
+    private bool _loading = true, _busy;
+    private string? _error, _ok, _type, _description;
+    private string _name = string.Empty;
+    private List<ProjectTemplate> _templates = new();
+    private List<PhaseDraft> _phases = new() { new PhaseDraft() };
+    private readonly Dictionary<int, string> _newProjectNames = new();
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private string GetNewName(int templateId) =>
+        _newProjectNames.TryGetValue(templateId, out var value) ? value : string.Empty;
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null;
+        try { _templates = (await Projects.ListTemplatesAsync()).ToList(); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task CreateTemplateAsync()
+    {
+        _busy = true; _error = null; _ok = null;
+        try
+        {
+            var template = new ProjectTemplate
+            {
+                Name = _name.Trim(),
+                Description = _description,
+                ProjectType = _type
+            };
+
+            var order = 0;
+            foreach (var draft in _phases.Where(p => !string.IsNullOrWhiteSpace(p.Name)))
+            {
+                var phase = new ProjectTemplatePhase
+                {
+                    Name = draft.Name.Trim(),
+                    SortOrder = order++,
+                    EstimatedDurationDays = draft.DurationDays
+                };
+
+                var taskOrder = 0;
+                foreach (var line in draft.TaskLines.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    var parts = line.Split('|', 2);
+                    phase.Tasks.Add(new ProjectTemplateTask
+                    {
+                        Name = parts[0].Trim(),
+                        SortOrder = taskOrder++,
+                        EstimatedHours = parts.Length > 1 && decimal.TryParse(parts[1].Trim(), out var h) ? h : 0m
+                    });
+                }
+                template.Phases.Add(phase);
+            }
+
+            await Projects.CreateTemplateAsync(template);
+            _ok = "Template saved.";
+            _name = string.Empty; _description = null; _type = null;
+            _phases = new List<PhaseDraft> { new() };
+            await LoadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task CloneAsync(ProjectTemplate template)
+    {
+        _busy = true; _error = null; _ok = null;
+        try
+        {
+            var name = GetNewName(template.Id);
+            if (string.IsNullOrWhiteSpace(name)) name = $"{template.Name} project";
+            var project = await Projects.CloneTemplateToProjectAsync(template.Id, new Project
+            {
+                Name = name.Trim(),
+                ProjectType = template.ProjectType,
+                Description = template.Description,
+                PlannedStartDate = DateTime.UtcNow.Date
+            });
+            Nav.NavigateTo($"/projects/{project.Id}/workspace");
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteAsync(int templateId)
+    {
+        _busy = true; _error = null; _ok = null;
+        try
+        {
+            await Projects.DeleteTemplateAsync(templateId);
+            _ok = "Template deleted.";
+            await LoadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}

@@ -188,6 +188,19 @@ public class ModuleRegistryTests
     }
 
     [Fact]
+    public void ProjectsModule_IsEnabledInCatalog()
+    {
+        var module = _registry.GetByKey(ModuleKeys.Projects);
+        Assert.NotNull(module);
+        Assert.False(module!.IsPlaceholder);
+        Assert.True(module.IsEnabled);
+        Assert.Equal(Permissions.ProjectsAccess, module.RequiredPermission);
+        Assert.Contains(ModuleKeys.Crm, module.Dependencies);
+        Assert.Contains(module.NavigationItems, n => n.Route == "/projects/list");
+        Assert.Contains(module.NavigationItems, n => n.Route == "/projects/my-work");
+    }
+
+    [Fact]
     public void AccountingModule_IsEnabledInCatalog()
     {
         var module = _registry.GetByKey(ModuleKeys.Accounting);

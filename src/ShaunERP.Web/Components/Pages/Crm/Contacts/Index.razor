@@ -13,6 +13,8 @@
         <a class="btn" href="/crm/contacts/new">Add contact</a>
     </header>
 
+    <ImportExportPanel EntityKey="contacts" />
+
     @if (_loading) { <p class="muted">Loading…</p> }
     else if (_items.Count == 0) { <p class="muted">No contacts yet.</p> }
     else

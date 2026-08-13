@@ -13,6 +13,8 @@
         <a class="btn" href="/crm/opportunities/new">Add opportunity</a>
     </header>
 
+    <ImportExportPanel EntityKey="opportunities" />
+
     @if (_loading) { <p class="muted">Loading…</p> }
     else if (_items.Count == 0) { <p class="muted">No opportunities yet.</p> }
     else

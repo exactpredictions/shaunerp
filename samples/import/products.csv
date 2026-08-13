@@ -1,0 +1,3 @@
+ProductCode,Name,UnitPrice,CurrencyCode,Category,ProductFamily,UnitOfMeasure,TaxRate,Description
+SAMPLE-PRD-001,SAMPLE Product A,999.00,INR,Services,Consulting,Each,18,SAMPLE product
+SAMPLE-PRD-002,SAMPLE Product B,1499.00,INR,Goods,,,18,

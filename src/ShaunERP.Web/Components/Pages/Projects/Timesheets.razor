@@ -1,0 +1,241 @@
+@page "/projects/timesheets"
+@attribute [Authorize]
+@inject IProjectManagementService Projects
+
+<PageTitle>Timesheets — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">Project Management</p>
+            <h1>Timesheets</h1>
+            <p class="muted">Log effort against projects and tasks, then submit for approval.</p>
+        </div>
+        <a class="btn ghost" href="/projects/my-work">My work</a>
+    </header>
+
+    @if (_error is not null) { <div class="alert">@_error</div> }
+    @if (_ok is not null) { <div class="ok-msg">@_ok</div> }
+
+    <div class="panel">
+        <h2>Log time</h2>
+        <div class="form-grid">
+            <label>Project
+                <select value="@_entryProjectId" @onchange="OnEntryProjectChangedAsync">
+                    <option value="">— Select project —</option>
+                    @foreach (var p in _projects)
+                    {
+                        <option value="@p.Id">@p.ProjectCode — @p.Name</option>
+                    }
+                </select>
+            </label>
+            <label>Task
+                <select value="@_entryTaskId" @onchange="e => _entryTaskId = e.Value?.ToString() ?? string.Empty">
+                    <option value="">— Project level —</option>
+                    @foreach (var t in _entryTasks)
+                    {
+                        <option value="@t.Id">@t.TaskNumber — @t.Name</option>
+                    }
+                </select>
+            </label>
+            <label>Work date<input type="date" value="@_entryDate.ToString("yyyy-MM-dd")" @onchange="OnEntryDateChanged" /></label>
+            <label>Hours<input type="number" step="0.25" min="0" value="@_entryHours" @onchange="OnEntryHoursChanged" /></label>
+            <label class="span-2">Description
+                <input value="@_entryDescription" @onchange="e => _entryDescription = e.Value?.ToString()" />
+            </label>
+            <label class="checkbox">
+                <input type="checkbox" checked="@_entryBillable" @onchange="e => _entryBillable = (bool)(e.Value ?? false)" />
+                <span>Billable</span>
+            </label>
+        </div>
+        <div class="form-actions">
+            <button class="btn" type="button" @onclick="CreateEntryAsync" disabled="@_busy">Add entry</button>
+        </div>
+    </div>
+
+    <div class="filter-bar">
+        <label>Project
+            <select value="@_filterProjectId" @onchange="e => _filterProjectId = e.Value?.ToString() ?? string.Empty">
+                <option value="">All</option>
+                @foreach (var p in _projects)
+                {
+                    <option value="@p.Id">@p.ProjectCode — @p.Name</option>
+                }
+            </select>
+        </label>
+        <label>Status
+            <select value="@_filterStatus" @onchange="e => _filterStatus = e.Value?.ToString() ?? string.Empty">
+                <option value="">All</option>
+                @foreach (var s in Enum.GetValues<TimesheetEntryStatus>())
+                {
+                    <option value="@s">@s</option>
+                }
+            </select>
+        </label>
+        <label class="check" style="align-self:center">
+            <input type="checkbox" checked="@_onlyMine" @onchange="e => _onlyMine = (bool)(e.Value ?? false)" />
+            <span>Only mine</span>
+        </label>
+        <button class="btn" type="button" @onclick="LoadEntriesAsync" disabled="@_loading">Apply</button>
+    </div>
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (_entries.Count == 0) { <p class="muted">No time entries yet.</p> }
+    else
+    {
+        <div class="table-wrap"><table class="data-table">
+            <thead>
+                <tr>
+                    <th>Date</th><th>Project</th><th>Task</th><th>User</th>
+                    <th class="num">Hours</th><th class="num">Billable</th><th>Description</th><th>Status</th><th></th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var e in _entries)
+            {
+                var row = e;
+                <tr>
+                    <td>@row.WorkDate.ToString("yyyy-MM-dd")</td>
+                    <td>@(row.Project?.Name ?? $"#{row.ProjectId}")</td>
+                    <td>@(row.Task?.Name ?? "—")</td>
+                    <td>@ProjectDisplay.UserName(row.User)</td>
+                    <td class="num mono">@row.Hours.ToString("N2")</td>
+                    <td class="num mono">@row.BillableHours.ToString("N2")</td>
+                    <td>@(row.Description ?? "—")</td>
+                    <td><span class="pill @ProjectDisplay.TimesheetStatusClass(row.EntryStatus)">@row.EntryStatus</span></td>
+                    <td class="inline-actions">
+                        @if (row.EntryStatus is TimesheetEntryStatus.Draft or TimesheetEntryStatus.Rejected)
+                        {
+                            <button class="btn ghost" type="button" disabled="@_busy" @onclick="() => SubmitAsync(row.Id)">Submit</button>
+                        }
+                        @if (row.EntryStatus == TimesheetEntryStatus.Submitted)
+                        {
+                            <button class="btn ghost" type="button" disabled="@_busy" @onclick="() => ApproveAsync(row.Id)">Approve</button>
+                            <button class="btn ghost danger" type="button" disabled="@_busy" @onclick="() => RejectAsync(row.Id)">Reject</button>
+                        }
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table></div>
+        <p class="muted">Total logged: @_entries.Sum(x => x.Hours).ToString("N2") h · billable @_entries.Sum(x => x.BillableHours).ToString("N2") h</p>
+    }
+</section>
+
+@code {
+    private bool _loading = true, _busy;
+    private string? _error, _ok;
+    private List<Project> _projects = new();
+    private List<ProjectTask> _entryTasks = new();
+    private List<ProjectTimesheet> _entries = new();
+
+    private string _entryProjectId = "", _entryTaskId = "";
+    private DateTime _entryDate = DateTime.UtcNow.Date;
+    private decimal _entryHours = 1m;
+    private string? _entryDescription;
+    private bool _entryBillable = true;
+
+    private string _filterProjectId = "", _filterStatus = "";
+    private bool _onlyMine = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _projects = (await Projects.ListProjectsAsync()).ToList(); }
+        catch (Exception ex) { _error = ex.Message; }
+        await LoadEntriesAsync();
+    }
+
+    private async Task OnEntryProjectChangedAsync(ChangeEventArgs e)
+    {
+        _entryProjectId = e.Value?.ToString() ?? "";
+        _entryTaskId = "";
+        _entryTasks = new List<ProjectTask>();
+        if (int.TryParse(_entryProjectId, out var pid) && pid > 0)
+        {
+            try
+            {
+                var page = await Projects.ListTasksAsync(new ProjectTaskFilter { ProjectId = pid, Take = 300 });
+                _entryTasks = page.Items.ToList();
+            }
+            catch (Exception ex) { _error = ex.Message; }
+        }
+    }
+
+    private void OnEntryDateChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var d)) _entryDate = d.Date;
+    }
+
+    private void OnEntryHoursChanged(ChangeEventArgs e)
+    {
+        if (decimal.TryParse(e.Value?.ToString(), out var h)) _entryHours = h;
+    }
+
+    private async Task CreateEntryAsync()
+    {
+        _busy = true; _error = null; _ok = null;
+        try
+        {
+            if (!int.TryParse(_entryProjectId, out var pid) || pid <= 0)
+                throw new InvalidOperationException("Select a project.");
+
+            await Projects.CreateTimesheetAsync(new ProjectTimesheet
+            {
+                ProjectId = pid,
+                TaskId = int.TryParse(_entryTaskId, out var tid) && tid > 0 ? tid : null,
+                WorkDate = _entryDate,
+                Hours = _entryHours,
+                BillableHours = _entryBillable ? _entryHours : 0m,
+                NonBillableHours = _entryBillable ? 0m : _entryHours,
+                Description = _entryDescription
+            });
+            _ok = "Time entry added.";
+            _entryDescription = null;
+            await LoadEntriesAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task LoadEntriesAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            _entries = (await Projects.ListTimesheetsAsync(new TimesheetFilter
+            {
+                ProjectId = int.TryParse(_filterProjectId, out var pid) && pid > 0 ? pid : null,
+                Status = Enum.TryParse<TimesheetEntryStatus>(_filterStatus, out var s) ? s : null,
+                OnlyMine = _onlyMine
+            })).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private Task SubmitAsync(int id) => RunAsync(async () =>
+    {
+        await Projects.SubmitTimesheetAsync(id);
+        _ok = "Submitted for approval.";
+    });
+
+    private Task ApproveAsync(int id) => RunAsync(async () =>
+    {
+        await Projects.ApproveTimesheetAsync(id);
+        _ok = "Entry approved.";
+    });
+
+    private Task RejectAsync(int id) => RunAsync(async () =>
+    {
+        await Projects.RejectTimesheetAsync(id);
+        _ok = "Entry rejected.";
+    });
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        _busy = true; _error = null; _ok = null;
+        try { await action(); await LoadEntriesAsync(); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}

@@ -1,0 +1,141 @@
+@inject IProjectManagementService Projects
+
+<div class="filter-bar">
+    @if (ProjectId is null)
+    {
+        <label>Project
+            <select value="@_projectId" @onchange="OnProjectChangedAsync">
+                <option value="">All my projects</option>
+                @foreach (var p in _projects)
+                {
+                    <option value="@p.Id">@p.ProjectCode — @p.Name</option>
+                }
+            </select>
+        </label>
+    }
+    <label>Assignee
+        <select value="@_assigneeId" @onchange="OnAssigneeChangedAsync">
+            <option value="">Anyone</option>
+            @foreach (var u in _users)
+            {
+                <option value="@u.Id">@ProjectDisplay.UserName(u)</option>
+            }
+        </select>
+    </label>
+    <button class="btn ghost" type="button" @onclick="LoadAsync" disabled="@_loading">Refresh</button>
+</div>
+
+@if (_error is not null) { <div class="alert">@_error</div> }
+@if (_loading) { <p class="muted">Loading…</p> }
+else
+{
+    <div class="pipeline-board kanban-board">
+        @foreach (var column in ProjectDisplay.KanbanColumns)
+        {
+            var items = _tasks.Where(t => t.TaskStatus == column).OrderBy(t => t.SortOrder).ThenBy(t => t.Id).ToList();
+            <div class="pipeline-col">
+                <header>
+                    <strong>@ProjectDisplay.Label(column)</strong>
+                    <span>@items.Count task@(items.Count == 1 ? "" : "s")</span>
+                </header>
+                <div class="pipeline-cards">
+                    @foreach (var task in items)
+                    {
+                        var current = task;
+                        <div class="pipeline-card">
+                            <strong>@current.Name</strong>
+                            <span class="mono">@current.TaskNumber</span>
+                            @if (ProjectId is null)
+                            {
+                                <span>@(current.Project?.Name ?? $"Project #{current.ProjectId}")</span>
+                            }
+                            <span class="owner">@ProjectDisplay.UserName(current.AssigneeUser)</span>
+                            <span class="@(ProjectDisplay.IsOverdue(current) ? "text-danger" : "")">
+                                Due @ProjectDisplay.Date(current.DueDate)
+                            </span>
+                            <select value="@current.TaskStatus"
+                                    @onchange="e => MoveAsync(current.Id, e.Value?.ToString())"
+                                    disabled="@_saving">
+                                @foreach (var s in ProjectDisplay.KanbanColumns)
+                                {
+                                    <option value="@s">@ProjectDisplay.Label(s)</option>
+                                }
+                            </select>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    /// <summary>When set the board is scoped to a single project and the project picker is hidden.</summary>
+    [Parameter] public int? ProjectId { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private bool _loading = true, _saving;
+    private string? _error;
+    private string _projectId = "", _assigneeId = "";
+    private List<ProjectTask> _tasks = new();
+    private List<Project> _projects = new();
+    private List<ShaunERP.Core.Identity.User> _users = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            if (ProjectId is null) _projects = (await Projects.ListProjectsAsync()).ToList();
+            _users = (await Projects.ListCompanyUsersAsync()).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        await LoadAsync();
+    }
+
+    private async Task OnProjectChangedAsync(ChangeEventArgs e)
+    {
+        _projectId = e.Value?.ToString() ?? "";
+        await LoadAsync();
+    }
+
+    private async Task OnAssigneeChangedAsync(ChangeEventArgs e)
+    {
+        _assigneeId = e.Value?.ToString() ?? "";
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            var page = await Projects.ListTasksAsync(new ProjectTaskFilter
+            {
+                ProjectId = ProjectId ?? (int.TryParse(_projectId, out var pid) && pid > 0 ? pid : null),
+                AssigneeUserId = int.TryParse(_assigneeId, out var aid) && aid > 0 ? aid : null,
+                Take = 500
+            });
+            _tasks = page.Items.ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task MoveAsync(int taskId, string? rawStatus)
+    {
+        if (!Enum.TryParse<ProjectTaskStatus>(rawStatus, out var status)) return;
+        _saving = true; _error = null;
+        try
+        {
+            var updated = await Projects.UpdateTaskStatusAsync(taskId, status);
+            if (updated is not null)
+            {
+                var existing = _tasks.FirstOrDefault(t => t.Id == taskId);
+                if (existing is not null) existing.TaskStatus = updated.TaskStatus;
+            }
+            if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; await LoadAsync(); }
+        finally { _saving = false; }
+    }
+}

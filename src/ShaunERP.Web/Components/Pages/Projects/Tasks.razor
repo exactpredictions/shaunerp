@@ -1,0 +1,163 @@
+@page "/projects/tasks"
+@attribute [Authorize]
+@inject IProjectManagementService Projects
+
+<PageTitle>Tasks — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">Project Management</p>
+            <h1>Tasks</h1>
+            <p class="muted">Every task you can see across projects.</p>
+        </div>
+        <div class="inline-actions">
+            <a class="btn ghost" href="/projects/kanban">Board view</a>
+            <a class="btn ghost" href="/projects/my-work">My work</a>
+        </div>
+    </header>
+
+    <ImportExportPanel EntityKey="project-tasks" />
+
+    <div class="filter-bar">
+        <label>Project
+            <select value="@_projectId" @onchange="e => _projectId = e.Value?.ToString() ?? string.Empty">
+                <option value="">All</option>
+                @foreach (var p in _projects)
+                {
+                    <option value="@p.Id">@p.ProjectCode — @p.Name</option>
+                }
+            </select>
+        </label>
+        <label>Assignee
+            <select value="@_assigneeId" @onchange="e => _assigneeId = e.Value?.ToString() ?? string.Empty">
+                <option value="">Anyone</option>
+                @foreach (var u in _users)
+                {
+                    <option value="@u.Id">@ProjectDisplay.UserName(u)</option>
+                }
+            </select>
+        </label>
+        <label>Status
+            <select value="@_status" @onchange="e => _status = e.Value?.ToString() ?? string.Empty">
+                <option value="">All</option>
+                @foreach (var s in Enum.GetValues<ProjectTaskStatus>())
+                {
+                    <option value="@s">@ProjectDisplay.Label(s)</option>
+                }
+            </select>
+        </label>
+        <label>Priority
+            <select value="@_priority" @onchange="e => _priority = e.Value?.ToString() ?? string.Empty">
+                <option value="">All</option>
+                @foreach (var p in Enum.GetValues<ProjectPriority>())
+                {
+                    <option value="@p">@p</option>
+                }
+            </select>
+        </label>
+        <label>Search
+            <input value="@_search" @onchange="e => _search = e.Value?.ToString()" placeholder="Number, name" />
+        </label>
+        <label class="check" style="align-self:center">
+            <input type="checkbox" checked="@_onlyOverdue" @onchange="e => _onlyOverdue = (bool)(e.Value ?? false)" />
+            <span>Overdue only</span>
+        </label>
+        <label class="check" style="align-self:center">
+            <input type="checkbox" checked="@_excludeCompleted" @onchange="e => _excludeCompleted = (bool)(e.Value ?? false)" />
+            <span>Hide completed</span>
+        </label>
+        <button class="btn" type="button" @onclick="ApplyAsync" disabled="@_loading">Apply</button>
+    </div>
+
+    @if (_error is not null) { <div class="alert">@_error</div> }
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (_items.Count == 0) { <p class="muted">No tasks match the current filters.</p> }
+    else
+    {
+        <div class="table-wrap"><table class="data-table">
+            <thead>
+                <tr>
+                    <th>Task</th><th>Name</th><th>Project</th><th>Assignee</th>
+                    <th>Status</th><th>Priority</th><th>Due</th>
+                    <th class="num">Est.</th><th class="num">Actual</th><th>Progress</th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var t in _items)
+            {
+                <tr>
+                    <td class="mono">@t.TaskNumber</td>
+                    <td>@t.Name</td>
+                    <td><a href="@($"/projects/{t.ProjectId}/workspace")">@(t.Project?.Name ?? $"#{t.ProjectId}")</a></td>
+                    <td>@ProjectDisplay.UserName(t.AssigneeUser)</td>
+                    <td><span class="pill @ProjectDisplay.TaskStatusClass(t.TaskStatus)">@ProjectDisplay.Label(t.TaskStatus)</span></td>
+                    <td><span class="pill @ProjectDisplay.PriorityClass(t.Priority)">@t.Priority</span></td>
+                    <td class="@(ProjectDisplay.IsOverdue(t) ? "text-danger" : "")">@ProjectDisplay.Date(t.DueDate)</td>
+                    <td class="num mono">@t.EstimatedHours.ToString("N1")</td>
+                    <td class="num mono">@t.ActualHours.ToString("N1")</td>
+                    <td>
+                        <div class="progress-bar"><span style="width:@ProjectDisplay.Pct(t.ProgressPercent)"></span></div>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table></div>
+
+        <div class="form-actions">
+            <span class="muted">Showing @_items.Count of @_total</span>
+            <button class="btn ghost" type="button" disabled="@(_skip == 0)" @onclick="PrevAsync">Previous</button>
+            <button class="btn ghost" type="button" disabled="@(_skip + _take >= _total)" @onclick="NextAsync">Next</button>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private string? _error, _search;
+    private string _projectId = "", _assigneeId = "", _status = "", _priority = "";
+    private bool _onlyOverdue, _excludeCompleted = true;
+    private int _skip, _take = 50, _total;
+    private List<ProjectTask> _items = new();
+    private List<Project> _projects = new();
+    private List<ShaunERP.Core.Identity.User> _users = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _projects = (await Projects.ListProjectsAsync()).ToList();
+            _users = (await Projects.ListCompanyUsersAsync()).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        await LoadAsync();
+    }
+
+    private async Task ApplyAsync() { _skip = 0; await LoadAsync(); }
+    private async Task NextAsync() { _skip += _take; await LoadAsync(); }
+    private async Task PrevAsync() { _skip = Math.Max(0, _skip - _take); await LoadAsync(); }
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            var page = await Projects.ListTasksAsync(new ProjectTaskFilter
+            {
+                ProjectId = int.TryParse(_projectId, out var pid) && pid > 0 ? pid : null,
+                AssigneeUserId = int.TryParse(_assigneeId, out var aid) && aid > 0 ? aid : null,
+                Status = Enum.TryParse<ProjectTaskStatus>(_status, out var s) ? s : null,
+                Priority = Enum.TryParse<ProjectPriority>(_priority, out var p) ? p : null,
+                Search = _search,
+                OnlyOverdue = _onlyOverdue,
+                ExcludeCompleted = _excludeCompleted,
+                Skip = _skip,
+                Take = _take
+            });
+            _items = page.Items.ToList();
+            _total = page.TotalCount;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+}

@@ -24,7 +24,7 @@ docker compose up -d --build
 curl http://localhost:8080/health
 ```
 
-Swagger (when `ASPNETCORE_ENVIRONMENT=Development`): `http://localhost:8080/swagger`
+Swagger (Development, or set `ENABLE_SWAGGER=true`): `http://localhost:8080/swagger`
 
 ### Without Docker (Linux packages)
 
@@ -36,12 +36,20 @@ dotnet run --project src/ShaunERP.Api
 
 Set `ConnectionStrings__DefaultConnection` and `Jwt__Key` via environment variables or `appsettings.json` (do not commit real secrets).
 
-## Demo login (seeded on first start)
+## Demo login (Development only)
 
-- Username: `admin`
-- Password: `Admin@12345`
+Demo admin (`admin` / `Admin@12345`) is seeded **only in Development** when `SEED_DEMO_DATA` is not `false`.  
+In **Production**, the seeder does **not** create `Admin@12345`. Use:
 
-Change this immediately on any shared environment.
+```bash
+export PROD_ADMIN_PASSWORD='...'
+export PROD_ACCOUNTANT_PASSWORD='...'
+./scripts/production-bootstrap-users.sh
+```
+
+Or: `dotnet run --project src/ShaunERP.Tools -- bootstrap-users --admin-password ... --accountant-password ...`
+
+Change passwords immediately on any shared environment. Users created by bootstrap have `MustChangePassword=true`.
 
 ## MVP API surface
 
@@ -61,9 +69,16 @@ src/
   ShaunERP.Core/            # Domain entities + platform module catalogue
   ShaunERP.Infrastructure/  # EF Core + PostgreSQL + auth/authz/seed
   ShaunERP.Web/             # Blazor Server application shell
+  ShaunERP.Tools/           # Ops console (production user bootstrap)
 tests/
   ShaunERP.Tests/           # Unit/integration tests
+config/templates/           # India company configuration templates
+samples/import/             # Sample CSV files for import importers
+scripts/                    # Postgres backup/restore + production bootstrap
 ```
+
+> Schema upgrades currently use `EnsureCreated` plus additive `IF NOT EXISTS` SQL in `DbSeeder`.  
+> Do **not** enable `Database.Migrate()` until an EF migration snapshot is committed.
 
 ## Platform foundation
 

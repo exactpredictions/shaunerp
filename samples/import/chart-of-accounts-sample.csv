@@ -1,0 +1,3 @@
+LedgerCode,LedgerName,GroupCode,OpeningBalance,OpeningBalanceType,Gstin,Pan,IsCashLedger,IsBankLedger
+SAMPLE-LED-001,SAMPLE Expense Ledger,EXP,0,Debit,,,false,false
+SAMPLE-LED-002,SAMPLE Bank Ledger,BANK,10000,Debit,,,false,true

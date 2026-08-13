@@ -1,0 +1,2 @@
+OrderNumber,VendorAccountNumber,OrderDate,Status,Notes 
+SAMPLE-PO-1001,SAMPLE-VEND-001,2026-08-01,Draft,SAMPLE PO - module may be partial 

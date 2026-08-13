@@ -1,0 +1,3 @@
+OrderNumber,CustomerAccountNumber,OrderDate,Status,Notes 
+SAMPLE-SO-1001,SAMPLE-CUST-001,2026-08-01,Draft,SAMPLE order 
+SAMPLE-SO-1002,SAMPLE-CUST-002,2026-08-02,Confirmed,SAMPLE order 

@@ -1,0 +1,2 @@
+EmployeeCode,FirstName,LastName,Email,Department,JoinDate,Tags 
+SAMPLE-EMP-001,SAMPLE,EmployeeOne,sample.emp1@example.com,Operations,2026-01-15,sample 

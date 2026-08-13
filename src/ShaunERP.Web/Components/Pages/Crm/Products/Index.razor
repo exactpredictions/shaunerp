@@ -9,6 +9,9 @@
         <div><p class="eyebrow">CRM</p><h1>Products</h1></div>
         <a class="btn" href="/crm/products/new">Add product</a>
     </header>
+
+    <ImportExportPanel EntityKey="products" />
+
     @if (_loading) { <p class="muted">Loading…</p> }
     else if (_items.Count == 0) { <p class="muted">No products yet.</p> }
     else

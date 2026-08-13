@@ -20,6 +20,8 @@ public class User : BaseEntity
     public string PasswordHash { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
     public bool IsSystemAdmin { get; set; }
+    /// <summary>When true, login succeeds but clients should force a password change.</summary>
+    public bool MustChangePassword { get; set; }
 
     public ICollection<CompanyUser> CompanyUsers { get; set; } = new List<CompanyUser>();
     public ICollection<Session> Sessions { get; set; } = new List<Session>();

@@ -1,0 +1,167 @@
+@page "/settings/company-configuration"
+@attribute [Authorize]
+@using System.Text
+@using ShaunERP.Core.ImportExport
+@inject ICompanyConfigurationService Config
+@inject ITenantContext Tenant
+@inject ShellStateService Shell
+@inject IModuleRegistry Modules
+
+<PageTitle>Company configuration — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">Settings</p>
+            <h1>Company configuration</h1>
+        </div>
+        <div class="form-actions">
+            <button class="btn ghost" @onclick='() => DownloadTemplateAsync("json")'>Blank JSON</button>
+            <button class="btn ghost" @onclick='() => DownloadTemplateAsync("yaml")'>Blank YAML</button>
+            <button class="btn ghost" @onclick="ExportCurrentAsync">Export current</button>
+        </div>
+    </header>
+
+    @if (_error is not null) { <div class="error-state">@_error</div> }
+    else if (_loading) { <div class="loading-state">Loading…</div> }
+    else
+    {
+        <div class="panel">
+            <p class="muted">Import India company configuration (JSON or YAML). No secrets are accepted or exported.</p>
+            <div class="form-grid">
+                <label>
+                    Format
+                    <select @bind="_format">
+                        <option value="json">JSON</option>
+                        <option value="yaml">YAML</option>
+                    </select>
+                </label>
+                <label>
+                    Configuration file
+                    <InputFile OnChange="OnFile" accept=".json,.yaml,.yml,application/json,text/yaml" />
+                </label>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_message)) { <p class="muted">@_message</p> }
+            @if (_preview is not null)
+            {
+                <p>Validation: @(_preview.Validation.IsValid ? "OK" : "Failed") · Diffs: @_preview.Diffs.Count</p>
+                @if (_preview.Validation.Errors.Count > 0)
+                {
+                    <ul>@foreach (var e in _preview.Validation.Errors) { <li class="error-state">@e</li> }</ul>
+                }
+                <table class="data-table">
+                    <thead><tr><th>Path</th><th>Action</th><th>Before</th><th>After</th></tr></thead>
+                    <tbody>
+                    @foreach (var d in _preview.Diffs.Take(40))
+                    {
+                        <tr>
+                            <td>@d.Path</td>
+                            <td>@d.Action</td>
+                            <td>@(d.Before ?? "—")</td>
+                            <td>@(d.After ?? "—")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+                <button class="btn" disabled="@(!_preview.CanApply || _busy)" @onclick="ApplyAsync">Apply configuration</button>
+            }
+            @if (!string.IsNullOrWhiteSpace(_downloadName) && _downloadBytes is not null)
+            {
+                <p>
+                    <a class="btn ghost" href="@($"data:application/octet-stream;base64,{Convert.ToBase64String(_downloadBytes)}")" download="@_downloadName">
+                        Download @_downloadName
+                    </a>
+                </p>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private string? _message;
+    private string _format = "json";
+    private CompanyConfigPreview? _preview;
+    private CompanyConfigurationDto? _proposed;
+    private byte[]? _downloadBytes;
+    private string? _downloadName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Shell.InitializeAsync();
+        var mod = Modules.GetByKey(ModuleKeys.Settings);
+        if (mod is null || (!Tenant.IsSystemAdmin && !Tenant.Permissions.Contains(Permissions.SettingsCompanyConfigManage)))
+        {
+            _error = "Access denied.";
+            _loading = false;
+            return;
+        }
+
+        _loading = false;
+    }
+
+    private async Task OnFile(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            _busy = true;
+            _error = null;
+            await using var stream = e.File.OpenReadStream(2 * 1024 * 1024);
+            using var reader = new StreamReader(stream);
+            var content = await reader.ReadToEndAsync();
+            var name = e.File.Name.ToLowerInvariant();
+            if (name.EndsWith(".yaml") || name.EndsWith(".yml")) _format = "yaml";
+            else _format = "json";
+            _proposed = Config.Deserialize(content, _format);
+            _preview = await Config.PreviewAsync(_proposed);
+            _message = "Preview ready.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ApplyAsync()
+    {
+        if (_proposed is null) return;
+        try
+        {
+            _busy = true;
+            var result = await Config.ApplyAsync(_proposed);
+            _message = string.Join(" ", result.Messages);
+            if (!result.Success) _error = _message;
+            else _preview = await Config.PreviewAsync(await Config.ExportCurrentAsync());
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DownloadTemplateAsync(string format)
+    {
+        var bytes = await Config.DownloadBlankTemplateAsync(format);
+        _downloadBytes = bytes;
+        _downloadName = $"india-company-production-template.{(format == "yaml" ? "yaml" : "json")}";
+    }
+
+    private async Task ExportCurrentAsync()
+    {
+        var current = await Config.ExportCurrentAsync();
+        var text = Config.Serialize(current, _format);
+        _downloadBytes = Encoding.UTF8.GetBytes(text);
+        _downloadName = $"company-configuration-export.{(_format == "yaml" ? "yaml" : "json")}";
+        _message = "Export ready.";
+    }
+}

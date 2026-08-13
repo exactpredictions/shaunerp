@@ -1,0 +1,3 @@
+Email,FirstName,LastName,Phone,Mobile,Title,Department,AccountNumber,Tags
+sample.contact1@example.com,SAMPLE,ContactOne,+91-9000000010,,Manager,Sales,SAMPLE-CUST-001,import
+sample.contact2@example.com,SAMPLE,ContactTwo,,,Director,,,import

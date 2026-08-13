@@ -1,0 +1,261 @@
+@page "/projects/new"
+@page "/projects/{Id:int}"
+@attribute [Authorize]
+@inject IProjectManagementService Projects
+@inject NavigationManager Nav
+
+<PageTitle>@(_isNew ? "New project" : "Edit project") — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">Project Management</p>
+            <h1>@(_isNew ? "New project" : (_model.Name is { Length: > 0 } ? _model.Name : $"Project #{Id}"))</h1>
+            @if (!_isNew && _model.ProjectCode is { Length: > 0 })
+            {
+                <p class="muted">@_model.ProjectCode · <span class="pill @ProjectDisplay.StatusClass(_model.ProjectStatus)">@_model.ProjectStatus</span></p>
+            }
+        </div>
+        <div class="inline-actions">
+            @if (!_isNew)
+            {
+                <a class="btn ghost" href="@($"/projects/{Id}/workspace")">Workspace</a>
+            }
+            <a class="btn ghost" href="/projects/list">Back</a>
+        </div>
+    </header>
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (!_isNew && _missing) { <div class="alert">Project not found.</div> }
+    else
+    {
+        @if (_error is not null) { <div class="alert">@_error</div> }
+        @if (_ok is not null) { <div class="ok-msg">@_ok</div> }
+
+        <EditForm Model="_model" OnValidSubmit="SaveAsync">
+            <div class="panel">
+                <h2>General</h2>
+                <div class="form-grid">
+                    <label>Project code
+                        <InputText @bind-Value="_model.ProjectCode" placeholder="Auto on save" disabled="@(!_isNew)" />
+                    </label>
+                    <label>Name
+                        <InputText @bind-Value="_model.Name" required />
+                    </label>
+                    <label class="span-2">Description
+                        <InputTextArea @bind-Value="_model.Description" rows="3" />
+                    </label>
+                    <label>Customer
+                        <select value="@_customerId" @onchange="e => _customerId = e.Value?.ToString() ?? string.Empty">
+                            <option value="">— Internal / none —</option>
+                            @foreach (var c in _customers)
+                            {
+                                <option value="@c.Id">@(c.CompanyName ?? $"Customer #{c.Id}")</option>
+                            }
+                        </select>
+                    </label>
+                    <label>Project type
+                        <InputText @bind-Value="_model.ProjectType" />
+                    </label>
+                    <label>Department
+                        <InputText @bind-Value="_model.Department" />
+                    </label>
+                    <label>Tags
+                        <InputText @bind-Value="_model.Tags" placeholder="comma,separated" />
+                    </label>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>Ownership &amp; status</h2>
+                <div class="form-grid">
+                    <label>Project manager
+                        <select value="@_managerId" @onchange="e => _managerId = e.Value?.ToString() ?? string.Empty">
+                            <option value="">— Unassigned —</option>
+                            @foreach (var u in _users)
+                            {
+                                <option value="@u.Id">@ProjectDisplay.UserName(u)</option>
+                            }
+                        </select>
+                    </label>
+                    <label>Owner
+                        <select value="@_ownerId" @onchange="e => _ownerId = e.Value?.ToString() ?? string.Empty">
+                            <option value="">— Unassigned —</option>
+                            @foreach (var u in _users)
+                            {
+                                <option value="@u.Id">@ProjectDisplay.UserName(u)</option>
+                            }
+                        </select>
+                    </label>
+                    <label>Status
+                        <InputSelect @bind-Value="_model.ProjectStatus">
+                            @foreach (var s in Enum.GetValues<ProjectStatus>())
+                            {
+                                <option value="@s">@s</option>
+                            }
+                        </InputSelect>
+                    </label>
+                    <label>Health
+                        <InputSelect @bind-Value="_model.HealthStatus">
+                            @foreach (var h in Enum.GetValues<ProjectHealthStatus>())
+                            {
+                                <option value="@h">@h</option>
+                            }
+                        </InputSelect>
+                    </label>
+                    <label>Priority
+                        <InputSelect @bind-Value="_model.Priority">
+                            @foreach (var p in Enum.GetValues<ProjectPriority>())
+                            {
+                                <option value="@p">@p</option>
+                            }
+                        </InputSelect>
+                    </label>
+                    <label>Progress %
+                        <InputNumber @bind-Value="_model.ProgressPercent" />
+                    </label>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>Schedule</h2>
+                <div class="form-grid">
+                    <label>Planned start<InputDate @bind-Value="_plannedStart" /></label>
+                    <label>Planned end<InputDate @bind-Value="_plannedEnd" /></label>
+                    <label>Actual start<InputDate @bind-Value="_actualStart" /></label>
+                    <label>Actual end<InputDate @bind-Value="_actualEnd" /></label>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>Commercials</h2>
+                <div class="form-grid">
+                    <label>Billing type
+                        <InputSelect @bind-Value="_model.BillingType">
+                            @foreach (var b in Enum.GetValues<ProjectBillingType>())
+                            {
+                                <option value="@b">@b</option>
+                            }
+                        </InputSelect>
+                    </label>
+                    <label>Currency<InputText @bind-Value="_model.CurrencyCode" /></label>
+                    <label>Budget<InputNumber @bind-Value="_model.Budget" /></label>
+                    <label>Revised budget<InputNumber @bind-Value="_model.RevisedBudget" /></label>
+                    <label>Estimated cost<InputNumber @bind-Value="_model.EstimatedCost" /></label>
+                    <label>Actual cost<InputNumber @bind-Value="_model.ActualCost" /></label>
+                    <label>Estimated hours<InputNumber @bind-Value="_model.EstimatedHours" /></label>
+                    <label>Customer billing<InputNumber @bind-Value="_model.CustomerBilling" /></label>
+                    <label class="span-2">Notes<InputTextArea @bind-Value="_model.Notes" rows="3" /></label>
+                </div>
+
+                <div class="form-actions">
+                    <button class="btn" type="submit" disabled="@_saving">@(_saving ? "Saving…" : "Save")</button>
+                    @if (!_isNew && _model.ProjectStatus != ProjectStatus.Archived)
+                    {
+                        <button class="btn ghost" type="button" disabled="@_saving" @onclick="ArchiveAsync">Archive</button>
+                    }
+                    <a class="btn ghost" href="/projects/list">Cancel</a>
+                </div>
+            </div>
+        </EditForm>
+    }
+</section>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool _isNew, _loading = true, _missing, _saving;
+    private string? _error, _ok;
+    private Project _model = new();
+    private List<Customer> _customers = new();
+    private List<ShaunERP.Core.Identity.User> _users = new();
+    private string _customerId = "", _managerId = "", _ownerId = "";
+    private DateTime? _plannedStart, _plannedEnd, _actualStart, _actualEnd;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true; _error = null; _ok = null; _missing = false;
+        _isNew = Nav.ToBaseRelativePath(Nav.Uri).Contains("projects/new", StringComparison.OrdinalIgnoreCase);
+        try
+        {
+            _customers = (await Projects.ListCustomersAsync()).ToList();
+            _users = (await Projects.ListCompanyUsersAsync()).ToList();
+
+            if (_isNew)
+            {
+                _model = new Project
+                {
+                    ProjectStatus = ProjectStatus.Planned,
+                    PlannedStartDate = DateTime.UtcNow.Date,
+                    PlannedEndDate = DateTime.UtcNow.Date.AddDays(30)
+                };
+                _customerId = _managerId = _ownerId = "";
+                Bind(_model);
+                return;
+            }
+
+            var row = await Projects.GetProjectAsync(Id);
+            if (row is null) { _missing = true; return; }
+            _model = row;
+            _customerId = row.CustomerId?.ToString() ?? "";
+            _managerId = row.ManagerUserId?.ToString() ?? "";
+            _ownerId = row.OwnerUserId?.ToString() ?? "";
+            Bind(row);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private void Bind(Project p)
+    {
+        _plannedStart = p.PlannedStartDate?.Date;
+        _plannedEnd = p.PlannedEndDate?.Date;
+        _actualStart = p.ActualStartDate?.Date;
+        _actualEnd = p.ActualEndDate?.Date;
+    }
+
+    private void Apply()
+    {
+        _model.CustomerId = int.TryParse(_customerId, out var cid) && cid > 0 ? cid : null;
+        _model.ManagerUserId = int.TryParse(_managerId, out var mid) && mid > 0 ? mid : null;
+        _model.OwnerUserId = int.TryParse(_ownerId, out var oid) && oid > 0 ? oid : null;
+        _model.PlannedStartDate = _plannedStart;
+        _model.PlannedEndDate = _plannedEnd;
+        _model.ActualStartDate = _actualStart;
+        _model.ActualEndDate = _actualEnd;
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true; _error = null; _ok = null;
+        try
+        {
+            Apply();
+            if (_isNew)
+            {
+                var created = await Projects.CreateProjectAsync(_model);
+                Nav.NavigateTo($"/projects/{created.Id}/workspace");
+                return;
+            }
+            var updated = await Projects.UpdateProjectAsync(Id, _model)
+                ?? throw new InvalidOperationException("Project not found.");
+            _model = updated;
+            Bind(updated);
+            _ok = "Saved.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task ArchiveAsync()
+    {
+        _saving = true; _error = null; _ok = null;
+        try
+        {
+            var archived = await Projects.ArchiveProjectAsync(Id);
+            if (archived is not null) { _model = archived; _ok = "Project archived."; }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+}

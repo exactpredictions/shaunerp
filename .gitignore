@@ -12,8 +12,11 @@ artifacts/
 
 ## Secrets / local env
 .env
+.env.production*
 appsettings.*.local.json
 **/appsettings.Local.json
+docs/private/
+*.raw
 
 ## Logs & test
 [Ll]og/

@@ -1,0 +1,114 @@
+@page "/projects/list"
+@attribute [Authorize]
+@inject IProjectManagementService Projects
+
+<PageTitle>Projects — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div><p class="eyebrow">Project Management</p><h1>Projects</h1></div>
+        <a class="btn" href="/projects/new">New project</a>
+    </header>
+
+    <ImportExportPanel EntityKey="projects" />
+
+    <div class="filter-bar">
+        <label>Search
+            <input value="@_search" @onchange="e => _search = e.Value?.ToString()" placeholder="Code, name, customer" />
+        </label>
+        <label>Status
+            <select value="@_status" @onchange="e => _status = e.Value?.ToString() ?? string.Empty">
+                <option value="">All</option>
+                @foreach (var s in Enum.GetValues<ProjectStatus>())
+                {
+                    <option value="@s">@s</option>
+                }
+            </select>
+        </label>
+        <label>Priority
+            <select value="@_priority" @onchange="e => _priority = e.Value?.ToString() ?? string.Empty">
+                <option value="">All</option>
+                @foreach (var p in Enum.GetValues<ProjectPriority>())
+                {
+                    <option value="@p">@p</option>
+                }
+            </select>
+        </label>
+        <label class="check" style="align-self:center">
+            <input type="checkbox" checked="@_includeArchived" @onchange="e => _includeArchived = (bool)(e.Value ?? false)" />
+            <span>Include archived</span>
+        </label>
+        <button class="btn" type="button" @onclick="LoadAsync" disabled="@_loading">Apply</button>
+    </div>
+
+    @if (_loading) { <p class="muted">Loading…</p> }
+    else if (_error is not null) { <div class="error-state">@_error</div> }
+    else if (_items.Count == 0) { <p class="muted">No projects match the current filters.</p> }
+    else
+    {
+        <div class="table-wrap"><table class="data-table">
+            <thead>
+                <tr>
+                    <th>Code</th><th>Name</th><th>Customer</th><th>Manager</th>
+                    <th>Status</th><th>Health</th><th>Priority</th>
+                    <th>Start</th><th>End</th><th>Progress</th><th class="num">Budget</th><th></th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var p in _items)
+            {
+                <tr>
+                    <td class="mono">@p.ProjectCode</td>
+                    <td>@p.Name</td>
+                    <td>@(p.CustomerName ?? p.Customer?.CompanyName ?? "—")</td>
+                    <td>@ProjectDisplay.UserName(p.ManagerUser)</td>
+                    <td><span class="pill @ProjectDisplay.StatusClass(p.ProjectStatus)">@p.ProjectStatus</span></td>
+                    <td><span class="pill @ProjectDisplay.HealthClass(p.HealthStatus)">@p.HealthStatus</span></td>
+                    <td><span class="pill @ProjectDisplay.PriorityClass(p.Priority)">@p.Priority</span></td>
+                    <td>@ProjectDisplay.Date(p.PlannedStartDate)</td>
+                    <td>@ProjectDisplay.Date(p.PlannedEndDate)</td>
+                    <td>
+                        <div class="progress-bar"><span style="width:@ProjectDisplay.Pct(p.ProgressPercent)"></span></div>
+                        <span class="muted">@p.ProgressPercent.ToString("N0")%</span>
+                    </td>
+                    <td class="num mono">@p.Budget.ToString("N0") @p.CurrencyCode</td>
+                    <td class="inline-actions">
+                        <a href="@($"/projects/{p.Id}/workspace")">Open</a>
+                        <a href="@($"/projects/{p.Id}")">Edit</a>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table></div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private string? _search;
+    private string _status = "";
+    private string _priority = "";
+    private bool _includeArchived;
+    private List<Project> _items = new();
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            var filter = new ProjectFilter
+            {
+                Search = _search,
+                IncludeArchived = _includeArchived,
+                Status = Enum.TryParse<ProjectStatus>(_status, out var s) ? s : null,
+                Priority = Enum.TryParse<ProjectPriority>(_priority, out var p) ? p : null
+            };
+            _items = (await Projects.ListProjectsAsync(filter)).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+}

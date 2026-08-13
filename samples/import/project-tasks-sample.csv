@@ -1,0 +1,3 @@
+ProjectCode,TaskNumber,Name,Description,PhaseName,MilestoneName,ParentTaskNumber,AssigneeEmail,Priority,TaskStatus,StartDate,DueDate,EstimatedHours,IsBillable,Tags
+SAMPLE-PRJ-001,SAMPLE-TSK-001,SAMPLE Kickoff,SAMPLE task description,,,,sample.owner@example.com,High,ToDo,2026-04-01,2026-04-10,8,true,import
+SAMPLE-PRJ-001,SAMPLE-TSK-002,SAMPLE Requirements,SAMPLE gather requirements,,,SAMPLE-TSK-001,sample.owner@example.com,Medium,Backlog,2026-04-11,2026-04-20,16,true,import

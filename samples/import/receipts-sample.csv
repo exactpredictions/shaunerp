@@ -1,0 +1,2 @@
+ReceiptNumber,CustomerAccountNumber,ReceiptDate,Amount,Method,Reference 
+SAMPLE-RCT-001,SAMPLE-CUST-001,2026-08-03,1000.00,NEFT,SAMPLE-RCT-UTR 

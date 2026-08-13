@@ -35,6 +35,7 @@ services:
       Jwt__Issuer: ${JWT_ISSUER:-shaunerp}
       Jwt__Audience: ${JWT_AUDIENCE:-shaunerp}
       Jwt__Key: ${JWT_KEY}
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:-}
     ports:
       - "127.0.0.1:8080:8080"
     networks:
@@ -58,6 +59,7 @@ services:
       Jwt__Issuer: ${JWT_ISSUER:-shaunerp}
       Jwt__Audience: ${JWT_AUDIENCE:-shaunerp}
       Jwt__Key: ${JWT_KEY}
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:-}
     volumes:
       - shaunerp_web_keys:/app/keys
     ports:

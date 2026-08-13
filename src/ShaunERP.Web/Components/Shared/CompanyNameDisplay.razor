@@ -1,0 +1,14 @@
+@namespace ShaunERP.Web.Components.Shared
+
+<span class="company-name-display @CssClass"
+      title="@FullName"
+      aria-label="@FullName">
+    @FullName
+</span>
+
+@code {
+    [Parameter] public string? Name { get; set; }
+    [Parameter] public string? CssClass { get; set; }
+
+    private string FullName => string.IsNullOrWhiteSpace(Name) ? "No account" : Name.Trim();
+}

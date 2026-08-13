@@ -11,6 +11,8 @@
         <a class="btn ghost" href="/finance/invoices">Invoices</a>
     </header>
 
+    <ImportExportPanel EntityKey="payments" />
+
     @if (_loading) { <p class="muted">Loading…</p> }
     else if (_error is not null) { <div class="error-state">@_error</div> }
     else if (_items.Count == 0) { <p class="muted">No payments recorded yet. Open an invoice to record a payment.</p> }

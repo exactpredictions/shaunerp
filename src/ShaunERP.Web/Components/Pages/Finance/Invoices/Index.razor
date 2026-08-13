@@ -10,6 +10,9 @@
         <div><p class="eyebrow">Finance</p><h1>Invoices</h1></div>
         <a class="btn" href="/finance/invoices/new">New invoice</a>
     </header>
+
+    <ImportExportPanel EntityKey="invoices" />
+
     @if (_loading) { <p class="muted">Loading…</p> }
     else if (_error is not null) { <div class="error-state">@_error</div> }
     else if (_items.Count == 0) { <p class="muted">No invoices yet. <a href="/finance/invoices/new">Create the first invoice</a>.</p> }
