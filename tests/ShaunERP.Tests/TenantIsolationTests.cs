@@ -6,6 +6,7 @@ using ShaunERP.Core.Platform;
 using ShaunERP.Infrastructure.Persistence;
 using ShaunERP.Infrastructure.Platform;
 using ShaunERP.Infrastructure.Services;
+using ShaunERP.Infrastructure.Services.Identity;
 
 namespace ShaunERP.Tests;
 
@@ -36,7 +37,9 @@ public class TenantIsolationTests
             Permissions = new HashSet<string>(Permissions.AdminDefaults, StringComparer.OrdinalIgnoreCase)
         });
 
-        var crm = new CrmService(db, tenant, new ModuleRegistry());
+        var crm = new CrmService(db, tenant, new ModuleRegistry(),
+            new PartyIdentityService(db, new IdentityMatchService(db, new PhoneNormalizer(), new EmailNormalizer()),
+                new PhoneNormalizer(), new EmailNormalizer()));
         var leads = await crm.ListLeadsAsync();
         Assert.Single(leads);
         Assert.Equal(1, leads[0].CompanyId);

@@ -1,0 +1,159 @@
+@page "/crm/identity-review"
+@attribute [Authorize]
+@inject IPartyDirectoryService People
+
+<PageTitle>Identity review — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM · Identity</p>
+            <h1>Identity review</h1>
+            <p class="muted">Ambiguous or conflicting person matches from imports and identity matching. No automatic merges.</p>
+        </div>
+        <a class="btn ghost" href="/crm/people">People</a>
+    </header>
+
+    <div class="grid-toolbar" style="margin-bottom:0.75rem">
+        <label class="grid-page-size">
+            <span>Status</span>
+            <select value="@_status" @onchange="OnStatusChanged" disabled="@_loading">
+                <option value="Pending">Pending</option>
+                <option value="Resolved">Resolved</option>
+                <option value="All">All</option>
+            </select>
+        </label>
+    </div>
+
+    <PagedListToolbar Query="_query" TotalCount="_total" Disabled="_loading"
+                      SearchPlaceholder="Search name, phone, email, reason…"
+                      QueryChanged="OnQueryChangedAsync" />
+
+    @if (!string.IsNullOrEmpty(_error)) { <div class="alert">@_error</div> }
+    @if (!string.IsNullOrEmpty(_ok)) { <div class="ok-msg">@_ok</div> }
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="muted">No identity conflicts currently require review.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Incoming</th>
+                        <th>Possible existing person</th>
+                        <th>Reason</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var x in _items)
+                    {
+                        <tr>
+                            <td>
+                                <div>@(x.IncomingName ?? "—")</div>
+                                <div class="muted">@(x.IncomingPhone ?? "—") · @(x.IncomingEmail ?? "—")</div>
+                            </td>
+                            <td>
+                                @if (x.CandidatePartyId is int pid)
+                                {
+                                    <a href="@($"/crm/people/{pid}")">@(x.CandidatePartyCode) · @(x.CandidateName ?? "Person")</a>
+                                }
+                                else
+                                {
+                                    <span>—</span>
+                                }
+                            </td>
+                            <td>@(x.MatchReason ?? "—")</td>
+                            <td>@x.ReviewStatus @(string.IsNullOrWhiteSpace(x.Resolution) ? "" : $"· {x.Resolution}")</td>
+                            <td>
+                                @if (x.ReviewStatus == "Pending")
+                                {
+                                    <div class="form-actions" style="flex-wrap:wrap;gap:0.35rem">
+                                        <button class="btn" type="button" @onclick="() => ResolveAsync(x.Id, IdentityReviewResolution.SamePerson)">Same person</button>
+                                        <button class="btn ghost" type="button" @onclick="() => ResolveAsync(x.Id, IdentityReviewResolution.CreateNewPerson)">Keep separate</button>
+                                        <button class="btn ghost" type="button" @onclick="() => ResolveAsync(x.Id, IdentityReviewResolution.Ignore)">Ignore</button>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <span class="muted">Resolved</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private ListQuery _query = new();
+    private string _status = "Pending";
+    private int _total;
+    private string? _error;
+    private string? _ok;
+    private List<IdentityReviewItemDto> _items = new();
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task OnQueryChangedAsync(ListQuery query)
+    {
+        _query = query;
+        await ReloadAsync();
+    }
+
+    private async Task OnStatusChanged(ChangeEventArgs e)
+    {
+        _status = e.Value?.ToString() ?? "Pending";
+        _query = _query.WithPage(1);
+        await ReloadAsync();
+    }
+
+    private async Task ResolveAsync(int id, IdentityReviewResolution resolution)
+    {
+        _error = null;
+        _ok = null;
+        try
+        {
+            var ok = await People.ResolveIdentityReviewAsync(id, new ResolveIdentityReviewRequest { Resolution = resolution });
+            if (!ok)
+            {
+                _error = "Could not resolve review item.";
+                return;
+            }
+
+            _ok = "Review marked resolved. No automatic merge was performed.";
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var page = await People.QueryIdentityReviewsAsync(_query, _status);
+            _items = page.Items.ToList();
+            _total = page.TotalCount;
+            _query = new ListQuery { Search = _query.Search, Page = page.Page, PageSize = page.PageSize };
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

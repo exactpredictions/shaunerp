@@ -1,10 +1,12 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using ShaunERP.Core.Identity;
 using ShaunERP.Core.ImportExport;
 using ShaunERP.Infrastructure.Persistence;
 using ShaunERP.Infrastructure.Platform;
 using ShaunERP.Infrastructure.Services;
+using ShaunERP.Infrastructure.Services.Identity;
 using ShaunERP.Infrastructure.Services.ImportExport;
 using ShaunERP.Infrastructure.Services.ImportExport.Importers;
 
@@ -47,6 +49,18 @@ public static class DependencyInjection
             projectFilesRoot = Path.Combine(AppContext.BaseDirectory, "App_Data", "project-files");
         }
         services.AddSingleton<IProjectFileStorage>(_ => new ProjectFileStorage(projectFilesRoot));
+
+        services.AddSingleton<IPhoneNormalizer, PhoneNormalizer>();
+        services.AddSingleton<IEmailNormalizer, EmailNormalizer>();
+        services.AddScoped<IIdentityMatchService, IdentityMatchService>();
+        services.AddScoped<IPartyIdentityService, PartyIdentityService>();
+        services.AddScoped<ILeadPartyBackfillService, LeadPartyBackfillService>();
+        services.AddScoped<IPartyDirectoryService, PartyDirectoryService>();
+        services.AddScoped<IStudentImportService, StudentImportService>();
+        services.AddScoped<IPremiumSubscriberImportService, PremiumSubscriberImportService>();
+        services.AddScoped<IReportPurchaseImportService, ReportPurchaseImportService>();
+        services.AddScoped<IConsultationImportService, ConsultationImportService>();
+        services.AddScoped<IRelationshipService, RelationshipService>();
 
         services.AddScoped<ICsvImportEngine, CsvImportEngine>();
         services.AddScoped<ICsvExportService, CsvExportService>();

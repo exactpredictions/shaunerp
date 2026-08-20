@@ -13,9 +13,6 @@
     <ImportExportPanel EntityKey="projects" />
 
     <div class="filter-bar">
-        <label>Search
-            <input value="@_search" @onchange="e => _search = e.Value?.ToString()" placeholder="Code, name, customer" />
-        </label>
         <label>Status
             <select value="@_status" @onchange="e => _status = e.Value?.ToString() ?? string.Empty">
                 <option value="">All</option>
@@ -38,8 +35,12 @@
             <input type="checkbox" checked="@_includeArchived" @onchange="e => _includeArchived = (bool)(e.Value ?? false)" />
             <span>Include archived</span>
         </label>
-        <button class="btn" type="button" @onclick="LoadAsync" disabled="@_loading">Apply</button>
+        <button class="btn" type="button" @onclick="ApplyFiltersAsync" disabled="@_loading">Apply filters</button>
     </div>
+
+    <PagedListToolbar Query="_query" TotalCount="_total" Disabled="_loading"
+                      SearchPlaceholder="Search code, name, customer, tags…"
+                      QueryChanged="OnQueryChangedAsync" />
 
     @if (_loading) { <p class="muted">Loading…</p> }
     else if (_error is not null) { <div class="error-state">@_error</div> }
@@ -86,13 +87,26 @@
 @code {
     private bool _loading = true;
     private string? _error;
-    private string? _search;
     private string _status = "";
     private string _priority = "";
     private bool _includeArchived;
+    private ListQuery _query = new();
+    private int _total;
     private List<Project> _items = new();
 
     protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task OnQueryChangedAsync(ListQuery query)
+    {
+        _query = query;
+        await LoadAsync();
+    }
+
+    private async Task ApplyFiltersAsync()
+    {
+        _query = _query.WithPage(1);
+        await LoadAsync();
+    }
 
     private async Task LoadAsync()
     {
@@ -101,12 +115,16 @@
         {
             var filter = new ProjectFilter
             {
-                Search = _search,
+                Search = _query.Search,
                 IncludeArchived = _includeArchived,
                 Status = Enum.TryParse<ProjectStatus>(_status, out var s) ? s : null,
-                Priority = Enum.TryParse<ProjectPriority>(_priority, out var p) ? p : null
+                Priority = Enum.TryParse<ProjectPriority>(_priority, out var p) ? p : null,
+                Skip = _query.Skip,
+                Take = _query.Take
             };
-            _items = (await Projects.ListProjectsAsync(filter)).ToList();
+            var page = await Projects.QueryProjectsAsync(filter);
+            _items = page.Items.ToList();
+            _total = page.TotalCount;
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _loading = false; }

@@ -72,6 +72,27 @@ public static class Permissions
     public const string CrmNotesUpdate = "crm.notes.update";
     public const string CrmNotesDelete = "crm.notes.delete";
 
+    /// <summary>View People (Party identity) directory.</summary>
+    public const string CrmPeopleView = "crm.people.view";
+    public const string CrmPeopleCreate = "crm.people.create";
+    public const string CrmPeopleUpdate = "crm.people.update";
+    /// <summary>View and resolve ImportMatchReview / identity conflicts.</summary>
+    public const string CrmIdentityReviewView = "crm.identity_review.view";
+    public const string CrmIdentityReviewResolve = "crm.identity_review.resolve";
+
+    public const string CrmCoursesView = "crm.courses.view";
+    public const string CrmCoursesManage = "crm.courses.manage";
+    public const string CrmEnrollmentsView = "crm.enrollments.view";
+    public const string CrmEnrollmentsManage = "crm.enrollments.manage";
+    public const string CrmSubscriptionsView = "crm.subscriptions.view";
+    public const string CrmSubscriptionsManage = "crm.subscriptions.manage";
+    public const string CrmConsultationsView = "crm.consultations.view";
+    public const string CrmConsultationsManage = "crm.consultations.manage";
+    public const string CrmEventsView = "crm.events.view";
+    public const string CrmEventsManage = "crm.events.manage";
+    public const string CrmReportsView = "crm.reports.view";
+    public const string CrmReportsManage = "crm.reports.manage";
+
     public const string FinanceAccess = "finance.access";
     public const string FinanceDashboardView = "finance.dashboard.view";
     public const string FinanceInvoicesView = "finance.invoices.view";
@@ -163,6 +184,13 @@ public static class Permissions
         CrmMeetingsView, CrmMeetingsCreate, CrmMeetingsUpdate, CrmMeetingsDelete,
         CrmCallsView, CrmCallsCreate, CrmCallsUpdate, CrmCallsDelete,
         CrmNotesView, CrmNotesCreate, CrmNotesUpdate, CrmNotesDelete,
+        CrmPeopleView, CrmPeopleCreate, CrmPeopleUpdate,
+        CrmIdentityReviewView, CrmIdentityReviewResolve,
+        CrmCoursesView, CrmCoursesManage, CrmEnrollmentsView, CrmEnrollmentsManage,
+        CrmSubscriptionsView, CrmSubscriptionsManage,
+        CrmConsultationsView, CrmConsultationsManage,
+        CrmEventsView, CrmEventsManage,
+        CrmReportsView, CrmReportsManage,
         FinanceAccess, FinanceDashboardView,
         FinanceInvoicesView, FinanceInvoicesCreate, FinanceInvoicesUpdate, FinanceInvoicesDelete,
         FinanceInvoicesMarkPaid, FinancePaymentsRecord, FinanceSettingsManage, FinanceCustomersView,
@@ -205,6 +233,13 @@ public static class Permissions
         CrmMeetingsView, CrmMeetingsCreate, CrmMeetingsUpdate, CrmMeetingsDelete,
         CrmCallsView, CrmCallsCreate, CrmCallsUpdate, CrmCallsDelete,
         CrmNotesView, CrmNotesCreate, CrmNotesUpdate, CrmNotesDelete,
+        CrmPeopleView, CrmPeopleCreate, CrmPeopleUpdate,
+        CrmIdentityReviewView, CrmIdentityReviewResolve,
+        CrmCoursesView, CrmCoursesManage, CrmEnrollmentsView, CrmEnrollmentsManage,
+        CrmSubscriptionsView, CrmSubscriptionsManage,
+        CrmConsultationsView, CrmConsultationsManage,
+        CrmEventsView, CrmEventsManage,
+        CrmReportsView, CrmReportsManage,
         FinanceAccess, FinanceDashboardView,
         FinanceInvoicesView, FinanceInvoicesCreate, FinanceInvoicesUpdate, FinanceInvoicesDelete,
         FinanceInvoicesMarkPaid, FinancePaymentsRecord, FinanceSettingsManage, FinanceCustomersView,
@@ -238,6 +273,10 @@ public static class Permissions
         CrmMeetingsView, CrmMeetingsCreate, CrmMeetingsUpdate,
         CrmCallsView, CrmCallsCreate, CrmCallsUpdate,
         CrmNotesView, CrmNotesCreate, CrmNotesUpdate,
+        CrmPeopleView,
+        CrmIdentityReviewView,
+        CrmCoursesView, CrmEnrollmentsView,
+        CrmSubscriptionsView, CrmConsultationsView, CrmEventsView, CrmReportsView,
         FinanceAccess, FinanceDashboardView,
         FinanceInvoicesView, FinanceInvoicesCreate, FinanceInvoicesUpdate,
         FinanceInvoicesMarkPaid, FinancePaymentsRecord, FinanceCustomersView,

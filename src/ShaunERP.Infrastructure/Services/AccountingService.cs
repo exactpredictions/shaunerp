@@ -53,12 +53,14 @@ public interface IAccountingService
     Task<AccountGroup> UpsertGroupAsync(AccountGroup group, CancellationToken ct = default);
 
     Task<IReadOnlyList<Ledger>> ListLedgersAsync(string? search = null, CancellationToken ct = default);
+    Task<PagedResult<Ledger>> QueryLedgersAsync(ListQuery? query = null, CancellationToken ct = default);
     Task<Ledger?> GetLedgerAsync(int id, CancellationToken ct = default);
     Task<Ledger> UpsertLedgerAsync(Ledger ledger, CancellationToken ct = default);
     Task<Ledger> EnsureCustomerLedgerAsync(Customer customer, CancellationToken ct = default);
 
     Task<IReadOnlyList<VoucherType>> ListVoucherTypesAsync(CancellationToken ct = default);
     Task<IReadOnlyList<AccountingVoucher>> ListVouchersAsync(string? typeCode = null, CancellationToken ct = default);
+    Task<PagedResult<AccountingVoucher>> QueryVouchersAsync(ListQuery? query = null, string? typeCode = null, CancellationToken ct = default);
     Task<AccountingVoucher?> GetVoucherAsync(int id, CancellationToken ct = default);
     Task DeleteDraftVoucherAsync(int id, CancellationToken ct = default);
 
@@ -552,18 +554,30 @@ public sealed class AccountingService : IAccountingService
 
     public async Task<IReadOnlyList<Ledger>> ListLedgersAsync(string? search = null, CancellationToken ct = default)
     {
+        var page = await QueryLedgersAsync(new ListQuery { Search = search, Page = 1, PageSize = 200 }, ct);
+        return page.Items;
+    }
+
+    public async Task<PagedResult<Ledger>> QueryLedgersAsync(ListQuery? query = null, CancellationToken ct = default)
+    {
         EnsureAccess(Permissions.AccountingLedgersView);
+        query ??= new ListQuery();
         var companyId = RequireCompanyId();
         var q = _db.Ledgers.AsNoTracking()
             .Include(l => l.AccountGroup)
             .Where(l => l.CompanyId == companyId);
-        if (!string.IsNullOrWhiteSpace(search))
+        var pattern = PagingQueryableExtensions.ToILikePattern(query.Search);
+        if (pattern is not null)
         {
-            var s = search.Trim().ToLowerInvariant();
-            q = q.Where(l => l.LedgerName.ToLower().Contains(s) || l.LedgerCode.ToLower().Contains(s));
+            q = q.Where(l =>
+                EF.Functions.ILike(l.LedgerCode, pattern) ||
+                EF.Functions.ILike(l.LedgerName, pattern) ||
+                (l.Gstin != null && EF.Functions.ILike(l.Gstin, pattern)) ||
+                (l.Pan != null && EF.Functions.ILike(l.Pan, pattern)) ||
+                (l.BankAccountNumber != null && EF.Functions.ILike(l.BankAccountNumber, pattern)));
         }
 
-        return await q.OrderBy(l => l.LedgerName).Take(500).ToListAsync(ct);
+        return await q.OrderBy(l => l.LedgerName).ToPagedResultAsync(query, ct);
     }
 
     public async Task<Ledger?> GetLedgerAsync(int id, CancellationToken ct = default)
@@ -678,6 +692,36 @@ public sealed class AccountingService : IAccountingService
         if (!string.IsNullOrWhiteSpace(typeCode))
             q = q.Where(v => v.VoucherType!.Code == typeCode);
         return await q.OrderByDescending(v => v.VoucherDate).ThenByDescending(v => v.Id).Take(500).ToListAsync(ct);
+    }
+
+    public async Task<PagedResult<AccountingVoucher>> QueryVouchersAsync(
+        ListQuery? query = null,
+        string? typeCode = null,
+        CancellationToken ct = default)
+    {
+        EnsureAccess(Permissions.AccountingVouchersView);
+        query ??= new ListQuery();
+        var companyId = RequireCompanyId();
+        var q = _db.AccountingVouchers.AsNoTracking()
+            .Include(v => v.VoucherType)
+            .Where(v => v.CompanyId == companyId);
+        if (!string.IsNullOrWhiteSpace(typeCode))
+        {
+            q = q.Where(v => v.VoucherType!.Code == typeCode);
+        }
+
+        var pattern = PagingQueryableExtensions.ToILikePattern(query.Search);
+        if (pattern is not null)
+        {
+            q = q.Where(v =>
+                EF.Functions.ILike(v.VoucherNumber, pattern) ||
+                (v.ReferenceNumber != null && EF.Functions.ILike(v.ReferenceNumber, pattern)) ||
+                (v.Narration != null && EF.Functions.ILike(v.Narration, pattern)) ||
+                (v.SourceModule != null && EF.Functions.ILike(v.SourceModule, pattern)) ||
+                (v.VoucherType != null && EF.Functions.ILike(v.VoucherType.Name, pattern)));
+        }
+
+        return await q.OrderByDescending(v => v.VoucherDate).ThenByDescending(v => v.Id).ToPagedResultAsync(query, ct);
     }
 
     public async Task<AccountingVoucher?> GetVoucherAsync(int id, CancellationToken ct = default)

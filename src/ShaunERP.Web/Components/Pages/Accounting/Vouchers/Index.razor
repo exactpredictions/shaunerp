@@ -21,32 +21,41 @@
         </div>
     </header>
 
+    <PagedListToolbar Query="_query" TotalCount="_total" Disabled="_loading"
+                      SearchPlaceholder="Search voucher #, reference, narration, type…"
+                      QueryChanged="OnQueryChangedAsync" />
+
     @if (_error is not null) { <div class="error-state">@_error</div> }
     else if (_loading) { <div class="loading-state">Loading…</div> }
+    else if (_rows.Count == 0) { <p class="muted">No vouchers match the current search.</p> }
     else
     {
-        <table class="data-table">
-            <thead><tr><th>Date</th><th>Number</th><th>Type</th><th>Narration</th><th>Status</th><th class="num">Amount</th></tr></thead>
-            <tbody>
-            @foreach (var v in _rows)
-            {
-                <tr>
-                    <td>@v.VoucherDate.ToString("dd-MMM-yyyy")</td>
-                    <td><a href="/accounting/vouchers/@v.Id">@v.VoucherNumber</a></td>
-                    <td>@(v.VoucherType?.Name ?? "—")</td>
-                    <td>@(v.Narration ?? "—")</td>
-                    <td>@v.VoucherStatus</td>
-                    <td class="num">@v.TotalDebit.ToString("N2")</td>
-                </tr>
-            }
-            </tbody>
-        </table>
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead><tr><th>Date</th><th>Number</th><th>Type</th><th>Narration</th><th>Status</th><th class="num">Amount</th></tr></thead>
+                <tbody>
+                @foreach (var v in _rows)
+                {
+                    <tr>
+                        <td>@v.VoucherDate.ToString("dd-MMM-yyyy")</td>
+                        <td><a href="/accounting/vouchers/@v.Id">@v.VoucherNumber</a></td>
+                        <td>@(v.VoucherType?.Name ?? "—")</td>
+                        <td>@(v.Narration ?? "—")</td>
+                        <td>@v.VoucherStatus</td>
+                        <td class="num">@v.TotalDebit.ToString("N2")</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
     }
 </section>
 
 @code {
     private bool _loading = true;
     private string? _error;
+    private ListQuery _query = new();
+    private int _total;
     private List<AccountingVoucher> _rows = new();
 
     protected override async Task OnInitializedAsync()
@@ -54,7 +63,25 @@
         await Shell.InitializeAsync();
         var mod = Modules.GetByKey(ModuleKeys.Accounting);
         if (mod is null || !Modules.CanAccessModule(mod, Tenant)) { _error = "Access denied."; _loading = false; return; }
-        try { _rows = (await Accounting.ListVouchersAsync()).ToList(); }
+        await ReloadAsync();
+    }
+
+    private async Task OnQueryChangedAsync(ListQuery query)
+    {
+        _query = query;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            var page = await Accounting.QueryVouchersAsync(_query);
+            _rows = page.Items.ToList();
+            _total = page.TotalCount;
+            _query = new ListQuery { Search = _query.Search, Page = page.Page, PageSize = page.PageSize };
+        }
         catch (Exception ex) { _error = ex.Message; }
         finally { _loading = false; }
     }

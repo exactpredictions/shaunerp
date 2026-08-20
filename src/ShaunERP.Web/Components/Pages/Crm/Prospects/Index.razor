@@ -15,8 +15,18 @@
 
     <ImportExportPanel EntityKey="prospects" />
 
-    @if (_loading) { <p class="muted">Loading…</p> }
-    else if (_items.Count == 0) { <p class="muted">No prospects yet.</p> }
+    <PagedListToolbar Query="_query" TotalCount="_total" Disabled="_loading"
+                      SearchPlaceholder="Search name, email, company, stage…"
+                      QueryChanged="OnQueryChangedAsync" />
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="muted">No matching rows.</p>
+    }
     else
     {
         <div class="table-wrap">
@@ -26,8 +36,8 @@
                         <th>Name</th>
                         <th>Company</th>
                         <th>Email</th>
-                        <th>Phone</th>
-                        <th>Lead #</th>
+                        <th>Stage</th>
+                        <th>Owner</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -38,8 +48,8 @@
                             <td>@x.FirstName @x.LastName</td>
                             <td>@(x.CompanyName ?? "—")</td>
                             <td>@(x.Email ?? "—")</td>
-                            <td>@(x.PhoneNumber ?? "—")</td>
-                            <td>@(x.LeadId?.ToString() ?? "—")</td>
+                            <td>@(x.Stage ?? "—")</td>
+                            <td>@(x.ProspectOwner ?? "—")</td>
                             <td><a href="@($"/crm/prospects/{x.Id}")">Edit</a></td>
                         </tr>
                     }
@@ -51,10 +61,31 @@
 
 @code {
     private bool _loading = true;
+    private ListQuery _query = new();
+    private int _total;
     private List<Prospect> _items = new();
-    protected override async Task OnInitializedAsync()
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task OnQueryChangedAsync(ListQuery query)
     {
-        _items = (await Crm.ListProspectsAsync()).ToList();
-        _loading = false;
+        _query = query;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var page = await Crm.QueryProspectsAsync(_query);
+            _items = page.Items.ToList();
+            _total = page.TotalCount;
+            _query = new ListQuery { Search = _query.Search, Page = page.Page, PageSize = page.PageSize };
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 }

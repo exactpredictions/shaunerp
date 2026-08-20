@@ -6,38 +6,84 @@
 
 <section class="page">
     <header class="page-head">
-        <div><p class="eyebrow">CRM · Service</p><h1>Cases</h1></div>
+        <div>
+            <p class="eyebrow">CRM</p>
+            <h1>Cases</h1>
+        </div>
         <a class="btn" href="/crm/cases/new">Add case</a>
     </header>
-    @if (_loading) { <p class="muted">Loading…</p> }
-    else if (_items.Count == 0) { <p class="muted">No cases yet.</p> }
+
+    <PagedListToolbar Query="_query" TotalCount="_total" Disabled="_loading"
+                      SearchPlaceholder="Search case #, subject, account, status…"
+                      QueryChanged="OnQueryChangedAsync" />
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="muted">No matching rows.</p>
+    }
     else
     {
-        <div class="table-wrap"><table>
-            <thead><tr><th>Number</th><th>Subject</th><th>Priority</th><th>Status</th><th>Account</th><th></th></tr></thead>
-            <tbody>
-            @foreach (var x in _items)
-            {
-                <tr>
-                    <td>@x.CaseNumber</td>
-                    <td>@x.Subject</td>
-                    <td>@(x.Priority ?? "—")</td>
-                    <td><span class="pill ok">@(x.CaseStatus ?? "New")</span></td>
-                    <td>@(x.AccountName ?? "—")</td>
-                    <td><a href="@($"/crm/cases/{x.Id}")">Edit</a></td>
-                </tr>
-            }
-            </tbody>
-        </table></div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Number</th>
+                        <th>Subject</th>
+                        <th>Account</th>
+                        <th>Status</th>
+                        <th>Priority</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var x in _items)
+                    {
+                        <tr>
+                            <td>@x.CaseNumber</td>
+                            <td>@x.Subject</td>
+                            <td>@(x.AccountName ?? "—")</td>
+                            <td>@(x.CaseStatus ?? "—")</td>
+                            <td>@(x.Priority ?? "—")</td>
+                            <td><a href="@($"/crm/cases/{x.Id}")">Edit</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
     }
 </section>
 
 @code {
     private bool _loading = true;
+    private ListQuery _query = new();
+    private int _total;
     private List<CrmCase> _items = new();
-    protected override async Task OnInitializedAsync()
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task OnQueryChangedAsync(ListQuery query)
     {
-        _items = (await Crm.ListCasesAsync()).ToList();
-        _loading = false;
+        _query = query;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var page = await Crm.QueryCasesAsync(_query);
+            _items = page.Items.ToList();
+            _total = page.TotalCount;
+            _query = new ListQuery { Search = _query.Search, Page = page.Page, PageSize = page.PageSize };
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 }

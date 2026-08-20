@@ -1,0 +1,144 @@
+@page "/crm/courses/{Id:int}"
+@attribute [Authorize]
+@inject IRelationshipService Relationships
+
+<PageTitle>@(_program?.Name ?? "Course") — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM · Relationships</p>
+            <h1>@(_program?.Name ?? "Course")</h1>
+            @if (_program is not null)
+            {
+                <p class="muted">Status: <span class="pill ok">@(_program.Status ?? "Active")</span></p>
+            }
+        </div>
+        <a class="btn ghost" href="/crm/courses">Back to Courses</a>
+    </header>
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_missing || _program is null)
+    {
+        <p class="alert">Course not found.</p>
+    }
+    else
+    {
+        <h2 class="form-section">Enrollments</h2>
+
+        <PagedListToolbar Query="_query" TotalCount="_total" Disabled="_loadingEnrollments"
+                          SearchPlaceholder="Search name, phone, email, or Party ID…"
+                          QueryChanged="OnQueryChangedAsync" />
+
+        @if (_loadingEnrollments)
+        {
+            <p class="muted">Loading enrollments…</p>
+        }
+        else if (_enrollments.Count == 0)
+        {
+            <p class="muted">No enrollments for this course.</p>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Party ID</th>
+                            <th>Name</th>
+                            <th>Phone</th>
+                            <th>Email</th>
+                            <th>Status</th>
+                            <th>Source</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var x in _enrollments)
+                        {
+                            <tr>
+                                <td><a href="@($"/crm/people/{x.PartyId}")">@x.PartyCode</a></td>
+                                <td>@x.DisplayName</td>
+                                <td>@(x.Phone ?? "—")</td>
+                                <td>@(x.Email ?? "—")</td>
+                                <td><span class="pill ok">@x.EnrollmentStatus</span></td>
+                                <td>@(x.Source ?? "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+</section>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool _loading = true;
+    private bool _loadingEnrollments = true;
+    private bool _missing;
+    private TrainingProgram? _program;
+    private EnrollmentListQuery _query = new();
+    private int _total;
+    private List<EnrollmentListItemDto> _enrollments = new();
+
+    protected override async Task OnParametersSetAsync() => await ReloadAsync();
+
+    private async Task OnQueryChangedAsync(ListQuery query)
+    {
+        _query = new EnrollmentListQuery
+        {
+            Search = query.Search,
+            Page = query.NormalizedPage,
+            PageSize = query.NormalizedPageSize,
+            ProgramId = Id
+        };
+        await ReloadEnrollmentsAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _loadingEnrollments = true;
+        try
+        {
+            _program = await Relationships.GetProgramAsync(Id);
+            _missing = _program is null;
+            if (_program is not null)
+            {
+                _query.ProgramId = Id;
+                await ReloadEnrollmentsAsync();
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task ReloadEnrollmentsAsync()
+    {
+        _loadingEnrollments = true;
+        try
+        {
+            _query.ProgramId = Id;
+            var page = await Relationships.QueryEnrollmentsAsync(_query);
+            _enrollments = page.Items.ToList();
+            _total = page.TotalCount;
+            _query = new EnrollmentListQuery
+            {
+                Search = _query.Search,
+                Page = page.Page,
+                PageSize = page.PageSize,
+                ProgramId = Id
+            };
+        }
+        finally
+        {
+            _loadingEnrollments = false;
+        }
+    }
+}

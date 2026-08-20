@@ -6,41 +6,86 @@
 
 <section class="page">
     <header class="page-head">
-        <div><p class="eyebrow">CRM</p><h1>Products</h1></div>
+        <div>
+            <p class="eyebrow">CRM</p>
+            <h1>Products</h1>
+        </div>
         <a class="btn" href="/crm/products/new">Add product</a>
     </header>
 
     <ImportExportPanel EntityKey="products" />
 
-    @if (_loading) { <p class="muted">Loading…</p> }
-    else if (_items.Count == 0) { <p class="muted">No products yet.</p> }
+    <PagedListToolbar Query="_query" TotalCount="_total" Disabled="_loading"
+                      SearchPlaceholder="Search code, name, family, category…"
+                      QueryChanged="OnQueryChangedAsync" />
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="muted">No matching rows.</p>
+    }
     else
     {
-        <div class="table-wrap"><table>
-            <thead><tr><th>Code</th><th>Name</th><th>Family</th><th>Price</th><th>Active</th><th></th></tr></thead>
-            <tbody>
-            @foreach (var x in _items)
-            {
-                <tr>
-                    <td>@x.ProductCode</td>
-                    <td>@x.Name</td>
-                    <td>@(x.ProductFamily ?? "—")</td>
-                    <td>@x.UnitPrice.ToString("N0") @(x.CurrencyCode)</td>
-                    <td><span class="pill @(x.IsActive ? "ok" : "off")">@(x.IsActive ? "Active" : "Inactive")</span></td>
-                    <td><a href="@($"/crm/products/{x.Id}")">Edit</a></td>
-                </tr>
-            }
-            </tbody>
-        </table></div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Code</th>
+                        <th>Name</th>
+                        <th>Family</th>
+                        <th>Price</th>
+                        <th>Active</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var x in _items)
+                    {
+                        <tr>
+                            <td>@x.ProductCode</td>
+                            <td>@x.Name</td>
+                            <td>@(x.ProductFamily ?? "—")</td>
+                            <td>@x.UnitPrice.ToString("N2")</td>
+                            <td>@(x.IsActive ? "Yes" : "No")</td>
+                            <td><a href="@($"/crm/products/{x.Id}")">Edit</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
     }
 </section>
 
 @code {
     private bool _loading = true;
+    private ListQuery _query = new();
+    private int _total;
     private List<CrmProduct> _items = new();
-    protected override async Task OnInitializedAsync()
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task OnQueryChangedAsync(ListQuery query)
     {
-        _items = (await Crm.ListProductsAsync()).ToList();
-        _loading = false;
+        _query = query;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var page = await Crm.QueryProductsAsync(_query);
+            _items = page.Items.ToList();
+            _total = page.TotalCount;
+            _query = new ListQuery { Search = _query.Search, Page = page.Page, PageSize = page.PageSize };
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 }

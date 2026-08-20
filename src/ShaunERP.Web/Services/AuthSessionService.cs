@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 using ShaunERP.Infrastructure.Persistence;
 using ShaunERP.Infrastructure.Platform;
+using ShaunERP.Infrastructure.Services;
 
 namespace ShaunERP.Web.Services;
 
@@ -14,31 +15,32 @@ public class AuthSessionService
     private readonly IAuthorizationContextService _authz;
     private readonly IAuditService _audit;
     private readonly ITenantContext _tenant;
+    private readonly IAuthService _auth;
 
     public AuthSessionService(
         ShaunErpDbContext db,
         IAuthorizationContextService authz,
         IAuditService audit,
-        ITenantContext tenant)
+        ITenantContext tenant,
+        IAuthService auth)
     {
         _db = db;
         _authz = authz;
         _audit = audit;
         _tenant = tenant;
+        _auth = auth;
     }
 
     public async Task<AuthSessionResult> ValidateAsync(string usernameOrEmail, string password, int? companyId = null)
     {
-        var key = usernameOrEmail.Trim().ToLowerInvariant();
-        var user = await _db.Users.FirstOrDefaultAsync(
-            u => u.Username.ToLower() == key || u.Email.ToLower() == key);
-
-        if (user is null || !user.IsActive || !BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
+        var login = await _auth.LoginAsync(new LoginRequest(usernameOrEmail, password, companyId));
+        if (!login.Success || login.User is null)
         {
-            return new AuthSessionResult(false, null, "Invalid credentials.", null);
+            return new AuthSessionResult(false, null, login.Error ?? "Invalid credentials.", null);
         }
 
-        var snapshot = await _authz.BuildForUserAsync(user.Id, companyId);
+        var user = await _db.Users.FirstAsync(u => u.Id == login.User.Id);
+        var snapshot = await _authz.BuildForUserAsync(user.Id, companyId ?? login.CompanyId);
         _tenant.Set(snapshot);
 
         var claims = _authz.ToClaims(snapshot, user).ToList();
@@ -48,14 +50,6 @@ public class AuthSessionService
         }
 
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
-
-        await _audit.WriteAsync(
-            "auth.login",
-            companyId: snapshot.CompanyId,
-            userId: user.Id,
-            entityType: "User",
-            entityId: user.Id.ToString());
-
         return new AuthSessionResult(true, new ClaimsPrincipal(identity), null, snapshot.CompanyId);
     }
 

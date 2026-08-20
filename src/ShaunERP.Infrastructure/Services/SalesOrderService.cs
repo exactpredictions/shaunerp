@@ -16,6 +16,7 @@ public interface ISalesOrderService
     Task<IReadOnlyList<Quote>> ListAcceptedQuotesAsync(CancellationToken ct = default);
 
     Task<IReadOnlyList<SalesOrder>> ListOrdersAsync(CancellationToken ct = default);
+    Task<PagedResult<SalesOrder>> QueryOrdersAsync(ListQuery? query = null, CancellationToken ct = default);
     Task<SalesOrder?> GetOrderAsync(int id, CancellationToken ct = default);
     Task<SalesOrder> CreateOrderAsync(SalesOrder order, CancellationToken ct = default);
     Task<SalesOrder?> UpdateOrderAsync(int id, SalesOrder update, CancellationToken ct = default);
@@ -123,6 +124,26 @@ public sealed class SalesOrderService : ISalesOrderService
             .ThenByDescending(o => o.Id)
             .Take(500)
             .ToListAsync(ct);
+    }
+
+    public async Task<PagedResult<SalesOrder>> QueryOrdersAsync(ListQuery? query = null, CancellationToken ct = default)
+    {
+        EnsureAccess(Permissions.OrdersView);
+        query ??= new ListQuery();
+        IQueryable<SalesOrder> q = TenantOrders(_db.SalesOrders.AsNoTracking()).Include(o => o.Customer);
+        var pattern = PagingQueryableExtensions.ToILikePattern(query.Search);
+        if (pattern is not null)
+        {
+            q = q.Where(o =>
+                EF.Functions.ILike(o.OrderNumber, pattern) ||
+                (o.CustomerName != null && EF.Functions.ILike(o.CustomerName, pattern)) ||
+                (o.PurchaseOrderNumber != null && EF.Functions.ILike(o.PurchaseOrderNumber, pattern)) ||
+                (o.Salesperson != null && EF.Functions.ILike(o.Salesperson, pattern)) ||
+                (o.Notes != null && EF.Functions.ILike(o.Notes, pattern)) ||
+                (o.Customer != null && o.Customer.CompanyName != null && EF.Functions.ILike(o.Customer.CompanyName, pattern)));
+        }
+
+        return await q.OrderByDescending(o => o.OrderDate).ThenByDescending(o => o.Id).ToPagedResultAsync(query, ct);
     }
 
     public async Task<SalesOrder?> GetOrderAsync(int id, CancellationToken ct = default)
@@ -369,6 +390,13 @@ public sealed class SalesOrderService : ISalesOrderService
             .Include(q => q.Lines)
             .FirstOrDefaultAsync(q => q.Id == quoteId && q.CompanyId == companyId, ct);
         if (quote is null) return null;
+        if (!string.Equals(quote.QuoteStage, "Accepted", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Only accepted quotes can become sales orders.");
+
+        var existing = await TenantOrders(_db.SalesOrders)
+            .FirstOrDefaultAsync(o => o.QuoteId == quoteId, ct);
+        if (existing is not null)
+            return await GetOrderAsync(existing.Id, ct);
 
         var order = new SalesOrder
         {

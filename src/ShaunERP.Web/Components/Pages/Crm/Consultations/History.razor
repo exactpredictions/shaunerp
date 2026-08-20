@@ -1,0 +1,258 @@
+@page "/crm/consultations"
+@attribute [Authorize]
+@inject IRelationshipService Relationships
+
+<PageTitle>Consultation Contacts — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM · Relationships</p>
+            <h1>Consultation Contacts</h1>
+            <p class="muted">Consultation interest and history linked through Party identity. Historical/Unclassified is not Completed.</p>
+        </div>
+    </header>
+
+    @if (_summary is not null)
+    {
+        <div class="stat-grid crm-stats" style="margin-bottom:1rem">
+            <button type="button" class="stat-card" style="cursor:pointer;border:none;text-align:left" @onclick='() => SetStatusAsync("All")'>
+                <strong>@_summary.Total</strong><span>Total contacts</span>
+            </button>
+            <button type="button" class="stat-card" style="cursor:pointer;border:none;text-align:left" @onclick='() => SetStatusAsync("Unclassified")'>
+                <strong>@_summary.Unclassified</strong><span>Historical / Unclassified</span>
+            </button>
+            <button type="button" class="stat-card" style="cursor:pointer;border:none;text-align:left" @onclick='() => SetStatusAsync("Interested")'>
+                <strong>@_summary.Interested</strong><span>Interested</span>
+            </button>
+            <button type="button" class="stat-card" style="cursor:pointer;border:none;text-align:left" @onclick='() => SetStatusAsync("NeedsFollowUp")'>
+                <strong>@_summary.NeedsFollowUp</strong><span>Needs follow-up</span>
+            </button>
+            <button type="button" class="stat-card" style="cursor:pointer;border:none;text-align:left" @onclick='() => SetStatusAsync("Scheduled")'>
+                <strong>@_summary.Scheduled</strong><span>Scheduled</span>
+            </button>
+            <button type="button" class="stat-card" style="cursor:pointer;border:none;text-align:left" @onclick='() => SetStatusAsync("Completed")'>
+                <strong>@_summary.Completed</strong><span>Completed</span>
+            </button>
+        </div>
+    }
+
+    <div class="grid-toolbar" style="flex-wrap:wrap;gap:0.75rem;margin-bottom:0.75rem">
+        <label class="grid-page-size">
+            <span>Status</span>
+            <select value="@_statusFilter" @onchange="OnStatusChanged" disabled="@_loading">
+                <option value="All">All</option>
+                <option value="Unclassified">Unclassified / Historical</option>
+                <option value="@ConsultationStatuses.Interested">Interested</option>
+                <option value="@ConsultationStatuses.Contacted">Contacted</option>
+                <option value="@ConsultationStatuses.AppointmentProposed">Appointment proposed</option>
+                <option value="@ConsultationStatuses.Scheduled">Scheduled</option>
+                <option value="@ConsultationStatuses.Completed">Completed</option>
+                <option value="@ConsultationStatuses.Cancelled">Cancelled</option>
+                <option value="@ConsultationStatuses.NoShow">No show</option>
+                <option value="@ConsultationStatuses.NotInterested">Not interested</option>
+                <option value="@ConsultationStatuses.Closed">Closed</option>
+                <option value="NeedsFollowUp">Needs follow-up</option>
+            </select>
+        </label>
+        <label class="grid-page-size">
+            <span>Student</span>
+            <select value="@_studentFilter" @onchange="OnStudentChanged" disabled="@_loading">
+                <option value="">All</option>
+                <option value="yes">Also student</option>
+                <option value="no">Not student</option>
+            </select>
+        </label>
+        <label class="grid-page-size">
+            <span>Subscriber</span>
+            <select value="@_subscriberFilter" @onchange="OnSubscriberChanged" disabled="@_loading">
+                <option value="All">All</option>
+                <option value="Active">Active subscriber</option>
+                <option value="Inactive">Inactive subscriber</option>
+                <option value="None">Never subscriber</option>
+            </select>
+        </label>
+        <label class="grid-page-size">
+            <span>Report purchaser</span>
+            <select value="@_reportFilter" @onchange="OnReportChanged" disabled="@_loading">
+                <option value="">All</option>
+                <option value="yes">Also report purchaser</option>
+                <option value="no">Not report purchaser</option>
+            </select>
+        </label>
+    </div>
+
+    <PagedListToolbar Query="_query" TotalCount="_total" Disabled="_loading"
+                      SearchPlaceholder="Search name, phone, email, Party ID, or source…"
+                      QueryChanged="OnQueryChangedAsync" />
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="muted">No consultation contacts match the current filters.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Party ID</th>
+                        <th>Name</th>
+                        <th>Phone</th>
+                        <th>Email</th>
+                        <th>Status</th>
+                        <th>Service</th>
+                        <th>Relevant date</th>
+                        <th>Source</th>
+                        <th>Update</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var x in _items)
+                    {
+                        <tr>
+                            <td><a href="@($"/crm/people/{x.PartyId}")">@x.PartyCode</a></td>
+                            <td>@x.DisplayName</td>
+                            <td>@(x.Phone ?? "—")</td>
+                            <td>@(x.Email ?? "—")</td>
+                            <td><span class="pill">@DisplayStatus(x.EngagementStatus)</span></td>
+                            <td>@(x.ServiceName ?? "—")</td>
+                            <td>@FormatRelevantDate(x)</td>
+                            <td>
+                                <div>@(x.Source ?? "—")</div>
+                                <div class="muted">@(x.ExternalReference ?? "")</div>
+                            </td>
+                            <td>
+                                <select value="@x.EngagementStatus" @onchange="e => OnStatusEditAsync(x.Id, e)" disabled="@_loading">
+                                    @foreach (var s in ConsultationStatuses.All)
+                                    {
+                                        <option value="@s">@DisplayStatus(s)</option>
+                                    }
+                                </select>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private ConsultationListQuery _query = new();
+    private string _statusFilter = "All";
+    private string _studentFilter = string.Empty;
+    private string _subscriberFilter = "All";
+    private string _reportFilter = string.Empty;
+    private int _total;
+    private List<ConsultationListItemDto> _items = new();
+    private ConsultationSummaryDto? _summary;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _summary = await Relationships.GetConsultationSummaryAsync();
+        await ReloadAsync();
+    }
+
+    private async Task OnQueryChangedAsync(ListQuery query)
+    {
+        _query = new ConsultationListQuery
+        {
+            Search = query.Search,
+            Page = query.Page,
+            PageSize = query.PageSize,
+            EngagementStatus = _query.EngagementStatus,
+            IsStudent = _query.IsStudent,
+            SubscriberFilter = _query.SubscriberFilter,
+            IsReportPurchaser = _query.IsReportPurchaser
+        };
+        await ReloadAsync();
+    }
+
+    private async Task SetStatusAsync(string status)
+    {
+        _statusFilter = status;
+        await ReloadAsync();
+    }
+
+    private async Task OnStatusChanged(ChangeEventArgs e)
+    {
+        _statusFilter = e.Value?.ToString() ?? "All";
+        await ReloadAsync();
+    }
+
+    private async Task OnStudentChanged(ChangeEventArgs e)
+    {
+        _studentFilter = e.Value?.ToString() ?? string.Empty;
+        await ReloadAsync();
+    }
+
+    private async Task OnSubscriberChanged(ChangeEventArgs e)
+    {
+        _subscriberFilter = e.Value?.ToString() ?? "All";
+        await ReloadAsync();
+    }
+
+    private async Task OnReportChanged(ChangeEventArgs e)
+    {
+        _reportFilter = e.Value?.ToString() ?? string.Empty;
+        await ReloadAsync();
+    }
+
+    private async Task OnStatusEditAsync(int id, ChangeEventArgs e)
+    {
+        var status = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(status)) return;
+        await Relationships.UpdateConsultationStatusAsync(id, status);
+        _summary = await Relationships.GetConsultationSummaryAsync();
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _query = new ConsultationListQuery
+            {
+                Search = _query.Search,
+                Page = _query.NormalizedPage,
+                PageSize = _query.NormalizedPageSize,
+                EngagementStatus = _statusFilter,
+                SubscriberFilter = _subscriberFilter,
+                IsStudent = _studentFilter switch { "yes" => true, "no" => false, _ => null },
+                IsReportPurchaser = _reportFilter switch { "yes" => true, "no" => false, _ => null }
+            };
+            var page = await Relationships.QueryConsultationsAsync(_query);
+            _items = page.Items.ToList();
+            _total = page.TotalCount;
+            _query.Page = page.Page;
+            _query.PageSize = page.PageSize;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string DisplayStatus(string status) => status switch
+    {
+        ConsultationStatuses.AppointmentProposed => "Appointment proposed",
+        ConsultationStatuses.NoShow => "No show",
+        ConsultationStatuses.NotInterested => "Not interested",
+        ConsultationStatuses.Unclassified => "Unclassified",
+        ConsultationStatuses.Historical => "Historical",
+        _ => status
+    };
+
+    private static string FormatRelevantDate(ConsultationListItemDto x)
+    {
+        var d = x.ConsultationDate ?? x.ScheduledDate ?? x.EnquiryDate ?? x.SourceCreatedAt;
+        return d?.ToLocalTime().ToString("dd MMM yyyy") ?? "—";
+    }
+}

@@ -2,6 +2,7 @@
 @page "/crm/quotes/{Id:int}"
 @attribute [Authorize]
 @inject ICrmService Crm
+@inject ISalesOrderService Orders
 @inject NavigationManager Nav
 
 <PageTitle>@(_isNew ? "Add quote" : "Edit quote") — ShaunERP</PageTitle>
@@ -9,7 +10,13 @@
 <section class="page">
     <header class="page-head">
         <div><p class="eyebrow">CRM · Quotes</p><h1>@(_isNew ? "Add quote" : "Edit quote")</h1></div>
-        <a class="btn ghost" href="/crm/quotes">Back</a>
+        <div class="inline-actions">
+            @if (!_isNew && string.Equals(_model.QuoteStage, "Accepted", StringComparison.OrdinalIgnoreCase))
+            {
+                <button class="btn" type="button" disabled="@_converting" @onclick="CreateOrderAsync">Create sales order</button>
+            }
+            <a class="btn ghost" href="/crm/quotes">Back</a>
+        </div>
     </header>
     @if (_loading) { <p class="muted">Loading…</p> }
     else if (!_isNew && _missing) { <p class="alert">Not found.</p> }
@@ -66,6 +73,7 @@
     private Quote _model = new() { QuoteStage = "Draft", CurrencyCode = "INR" };
     private List<QuoteLine> _lines = [new() { Quantity = 1 }];
     private string? _error, _ok;
+    private bool _converting;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -96,6 +104,22 @@
         _model = u;
         _lines = u.Lines?.ToList() ?? _lines;
         _ok = "Saved.";
+    }
+
+    private async Task CreateOrderAsync()
+    {
+        _error = null; _ok = null; _converting = true;
+        try
+        {
+            var order = await Orders.CreateFromQuoteAsync(Id);
+            if (order is null) { _error = "Quote not found."; return; }
+            Nav.NavigateTo($"/orders/{order.Id}");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally { _converting = false; }
     }
 
     private async Task DeleteAsync()

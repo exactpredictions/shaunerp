@@ -1,3 +1,3 @@
 AccountNumber,CompanyName,PrimaryContact,Email,PhoneNumber,BillingAddress,PaymentTerms,CreditLimit,TaxId,Industry,Website,CustomerType,Territory,Tags
-SAMPLE-CUST-001,SAMPLE Acme India Pvt Ltd,SAMPLE Ravi,sample.customer1@example.com,+91-9876543210,"12 SAMPLE Road, Chennai",Net 30,150000,33AAAAA0000A1Z5,Technology,https://example.com,Business,South,import
-SAMPLE-CUST-002,SAMPLE Beta Traders,SAMPLE Meena,sample.customer2@example.com,+91-9876543211,"45 SAMPLE Street, Bengaluru",Net 15,50000,29AAAAA0000A1Z5,Retail,,Business,South,import
+SAMPLE-CUST-001,SAMPLE Acme India Pvt Ltd,SAMPLE Ravi,sample.customer1@example.com,'+91-9876543210,"12 SAMPLE Road, Chennai",Net 30,150000,33AAAAA0000A1Z5,Technology,https://example.com,Business,South,import
+SAMPLE-CUST-002,SAMPLE Beta Traders,SAMPLE Meena,sample.customer2@example.com,'+91-9876543211,"45 SAMPLE Street, Bengaluru",Net 15,50000,29AAAAA0000A1Z5,Retail,,Business,South,import

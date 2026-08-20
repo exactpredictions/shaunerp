@@ -6,38 +6,84 @@
 
 <section class="page">
     <header class="page-head">
-        <div><p class="eyebrow">CRM</p><h1>Quotes</h1></div>
+        <div>
+            <p class="eyebrow">CRM</p>
+            <h1>Quotes</h1>
+        </div>
         <a class="btn" href="/crm/quotes/new">Add quote</a>
     </header>
-    @if (_loading) { <p class="muted">Loading…</p> }
-    else if (_items.Count == 0) { <p class="muted">No quotes yet.</p> }
+
+    <PagedListToolbar Query="_query" TotalCount="_total" Disabled="_loading"
+                      SearchPlaceholder="Search quote #, subject, account…"
+                      QueryChanged="OnQueryChangedAsync" />
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="muted">No matching rows.</p>
+    }
     else
     {
-        <div class="table-wrap"><table>
-            <thead><tr><th>Number</th><th>Subject</th><th>Account</th><th>Stage</th><th>Total</th><th></th></tr></thead>
-            <tbody>
-            @foreach (var x in _items)
-            {
-                <tr>
-                    <td>@x.QuoteNumber</td>
-                    <td>@x.Subject</td>
-                    <td>@(x.AccountName ?? "—")</td>
-                    <td><span class="pill ok">@(x.QuoteStage ?? "Draft")</span></td>
-                    <td>@x.GrandTotal.ToString("N0")</td>
-                    <td><a href="@($"/crm/quotes/{x.Id}")">Edit</a></td>
-                </tr>
-            }
-            </tbody>
-        </table></div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Number</th>
+                        <th>Subject</th>
+                        <th>Account</th>
+                        <th>Stage</th>
+                        <th>Total</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var x in _items)
+                    {
+                        <tr>
+                            <td>@x.QuoteNumber</td>
+                            <td>@x.Subject</td>
+                            <td>@(x.AccountName ?? "—")</td>
+                            <td>@(x.QuoteStage ?? "—")</td>
+                            <td>@x.GrandTotal.ToString("N2")</td>
+                            <td><a href="@($"/crm/quotes/{x.Id}")">Edit</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
     }
 </section>
 
 @code {
     private bool _loading = true;
+    private ListQuery _query = new();
+    private int _total;
     private List<Quote> _items = new();
-    protected override async Task OnInitializedAsync()
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task OnQueryChangedAsync(ListQuery query)
     {
-        _items = (await Crm.ListQuotesAsync()).ToList();
-        _loading = false;
+        _query = query;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var page = await Crm.QueryQuotesAsync(_query);
+            _items = page.Items.ToList();
+            _total = page.TotalCount;
+            _query = new ListQuery { Search = _query.Search, Page = page.Page, PageSize = page.PageSize };
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 }

@@ -29,6 +29,15 @@ public class ShaunErpDbContext : DbContext
     public DbSet<UserCompanyPreference> UserCompanyPreferences => Set<UserCompanyPreference>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
+    // Party identity
+    public DbSet<Party> Parties => Set<Party>();
+    public DbSet<PartyPerson> PartyPersons => Set<PartyPerson>();
+    public DbSet<PartyPhone> PartyPhones => Set<PartyPhone>();
+    public DbSet<PartyEmail> PartyEmails => Set<PartyEmail>();
+    public DbSet<ImportBatch> ImportBatches => Set<ImportBatch>();
+    public DbSet<ImportSourceRow> ImportSourceRows => Set<ImportSourceRow>();
+    public DbSet<ImportMatchReview> ImportMatchReviews => Set<ImportMatchReview>();
+
     // CRM
     public DbSet<Lead> Leads => Set<Lead>();
     public DbSet<Prospect> Prospects => Set<Prospect>();
@@ -36,6 +45,16 @@ public class ShaunErpDbContext : DbContext
     public DbSet<Contact> Contacts => Set<Contact>();
     public DbSet<Opportunity> Opportunities => Set<Opportunity>();
     public DbSet<Customer> CrmCustomers => Set<Customer>();
+    public DbSet<TrainingProgram> TrainingPrograms => Set<TrainingProgram>();
+    public DbSet<CourseEnrollment> CourseEnrollments => Set<CourseEnrollment>();
+    public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
+    public DbSet<SubscriptionMembership> SubscriptionMemberships => Set<SubscriptionMembership>();
+    public DbSet<ConsultationService> ConsultationServices => Set<ConsultationService>();
+    public DbSet<ConsultationEngagement> ConsultationEngagements => Set<ConsultationEngagement>();
+    public DbSet<CrmEvent> CrmEvents => Set<CrmEvent>();
+    public DbSet<EventParticipation> EventParticipations => Set<EventParticipation>();
+    public DbSet<ReportProduct> ReportProducts => Set<ReportProduct>();
+    public DbSet<ReportPurchase> ReportPurchases => Set<ReportPurchase>();
     public DbSet<CrmTask> CrmTasks => Set<CrmTask>();
     public DbSet<Meeting> Meetings => Set<Meeting>();
     public DbSet<CrmCall> CrmCalls => Set<CrmCall>();
@@ -137,6 +156,88 @@ public class ShaunErpDbContext : DbContext
 
         modelBuilder.Entity<Customer>().ToTable("Customers");
         modelBuilder.Entity<ShaunERP.Core.Crm.Account>().ToTable("CrmAccounts");
+
+        modelBuilder.Entity<Party>(e =>
+        {
+            e.HasIndex(x => new { x.CompanyId, x.PartyType });
+            e.HasIndex(x => new { x.CompanyId, x.DisplayName });
+        });
+        modelBuilder.Entity<PartyPerson>(e =>
+        {
+            e.HasIndex(x => x.PartyId).IsUnique();
+            e.HasOne(x => x.Party).WithOne(x => x.Person).HasForeignKey<PartyPerson>(x => x.PartyId);
+        });
+        modelBuilder.Entity<PartyPhone>(e =>
+        {
+            e.HasIndex(x => x.PartyId);
+            e.HasIndex(x => x.NormalizedPhone);
+            e.HasIndex(x => x.E164Phone);
+            e.HasOne(x => x.Party).WithMany(x => x.Phones).HasForeignKey(x => x.PartyId);
+        });
+        modelBuilder.Entity<PartyEmail>(e =>
+        {
+            e.HasIndex(x => x.PartyId);
+            e.HasIndex(x => x.NormalizedEmail);
+            e.HasOne(x => x.Party).WithMany(x => x.Emails).HasForeignKey(x => x.PartyId);
+        });
+        modelBuilder.Entity<ImportSourceRow>()
+            .HasOne(x => x.ImportBatch).WithMany(x => x.Rows).HasForeignKey(x => x.ImportBatchId);
+
+        modelBuilder.Entity<Lead>().HasIndex(x => x.PartyId);
+        modelBuilder.Entity<Prospect>().HasIndex(x => x.PartyId);
+        modelBuilder.Entity<Contact>().HasIndex(x => x.PartyId);
+        modelBuilder.Entity<Customer>().HasIndex(x => x.PartyId);
+        modelBuilder.Entity<Opportunity>().HasIndex(x => x.PartyId);
+
+        modelBuilder.Entity<CrmEvent>().ToTable("Events");
+        modelBuilder.Entity<TrainingProgram>().HasIndex(x => new { x.CompanyId, x.Name });
+        modelBuilder.Entity<CourseEnrollment>(e =>
+        {
+            e.HasIndex(x => x.PartyId);
+            e.HasIndex(x => x.ProgramId);
+            e.HasIndex(x => new { x.CompanyId, x.PartyId, x.ProgramId }).IsUnique();
+            e.HasOne(x => x.Party).WithMany().HasForeignKey(x => x.PartyId);
+            e.HasOne(x => x.Program).WithMany(x => x.Enrollments).HasForeignKey(x => x.ProgramId);
+        });
+        modelBuilder.Entity<SubscriptionPlan>().HasIndex(x => new { x.CompanyId, x.Name });
+        modelBuilder.Entity<SubscriptionMembership>(e =>
+        {
+            e.HasIndex(x => x.PartyId);
+            e.HasIndex(x => x.PlanId);
+            e.HasIndex(x => new { x.CompanyId, x.MembershipStatus });
+            e.HasIndex(x => new { x.CompanyId, x.ExternalReference });
+            e.HasOne(x => x.Party).WithMany().HasForeignKey(x => x.PartyId);
+            e.HasOne(x => x.Plan).WithMany(x => x.Memberships).HasForeignKey(x => x.PlanId);
+        });
+        modelBuilder.Entity<ConsultationService>().HasIndex(x => new { x.CompanyId, x.Name });
+        modelBuilder.Entity<ConsultationEngagement>(e =>
+        {
+            e.HasIndex(x => x.PartyId);
+            e.HasIndex(x => x.ConsultationServiceId);
+            e.HasIndex(x => new { x.CompanyId, x.EngagementStatus });
+            e.HasIndex(x => new { x.CompanyId, x.ExternalReference });
+            e.HasOne(x => x.Party).WithMany().HasForeignKey(x => x.PartyId);
+            e.HasOne(x => x.ConsultationService).WithMany(x => x.Engagements).HasForeignKey(x => x.ConsultationServiceId);
+        });
+        modelBuilder.Entity<CrmEvent>().HasIndex(x => new { x.CompanyId, x.Name });
+        modelBuilder.Entity<EventParticipation>(e =>
+        {
+            e.HasIndex(x => x.PartyId);
+            e.HasIndex(x => x.EventId);
+            e.HasIndex(x => new { x.CompanyId, x.PartyId, x.EventId }).IsUnique();
+            e.HasOne(x => x.Party).WithMany().HasForeignKey(x => x.PartyId);
+            e.HasOne(x => x.Event).WithMany(x => x.Participations).HasForeignKey(x => x.EventId);
+        });
+        modelBuilder.Entity<ReportProduct>().HasIndex(x => new { x.CompanyId, x.Name }).IsUnique();
+        modelBuilder.Entity<ReportPurchase>(e =>
+        {
+            e.HasIndex(x => x.PartyId);
+            e.HasIndex(x => x.ReportProductId);
+            e.HasIndex(x => new { x.CompanyId, x.PaymentDate });
+            e.HasIndex(x => new { x.CompanyId, x.ExternalReference });
+            e.HasOne(x => x.Party).WithMany().HasForeignKey(x => x.PartyId);
+            e.HasOne(x => x.ReportProduct).WithMany(x => x.Purchases).HasForeignKey(x => x.ReportProductId);
+        });
 
         modelBuilder.Entity<Invoice>()
             .HasIndex(x => new { x.CompanyId, x.InvoiceNumber });

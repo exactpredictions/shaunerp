@@ -60,7 +60,7 @@ public static class CsvParser
                         continue;
                     }
 
-                    dict[key] = c < fields.Count ? fields[c].Trim() : string.Empty;
+                    dict[key] = c < fields.Count ? SanitizeField(fields[c]) : string.Empty;
                 }
 
                 rows.Add(dict);
@@ -94,6 +94,15 @@ public static class CsvParser
     public static string Escape(string? value)
     {
         value ??= string.Empty;
+
+        // Excel/LibreOffice treat cells starting with = + - @ as formulas.
+        // Phone +91-9000000001 becomes 91-9000000001 = -8999999910.
+        // Prefix with apostrophe so spreadsheets keep the literal text.
+        if (IsSpreadsheetFormulaRisk(value))
+        {
+            value = "'" + value;
+        }
+
         var needsQuotes = value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r');
         if (value.Contains('"'))
         {
@@ -102,6 +111,23 @@ public static class CsvParser
 
         return needsQuotes ? $"\"{value}\"" : value;
     }
+
+    /// <summary>
+    /// Strip Excel text marker (leading ') used to prevent formula interpretation.
+    /// </summary>
+    public static string SanitizeField(string? value)
+    {
+        value = (value ?? string.Empty).Trim();
+        if (value.Length >= 2 && value[0] == '\'' && IsSpreadsheetFormulaRisk(value[1..]))
+        {
+            return value[1..];
+        }
+
+        return value;
+    }
+
+    public static bool IsSpreadsheetFormulaRisk(string? value) =>
+        !string.IsNullOrEmpty(value) && value[0] is '=' or '+' or '-' or '@';
 
     public static string NormalizeHeader(string header) =>
         (header ?? string.Empty).Trim().Trim('\uFEFF');

@@ -36,8 +36,11 @@ public sealed class ProjectFilter
     public int? CustomerId { get; set; }
     public int? ManagerUserId { get; set; }
     public bool IncludeArchived { get; set; }
-    public int Take { get; set; } = 200;
+    public int Skip { get; set; }
+    public int Take { get; set; } = 50;
 }
+
+public sealed record ProjectPage(IReadOnlyList<Project> Items, int TotalCount);
 
 public sealed class ProjectTaskFilter
 {
@@ -91,6 +94,7 @@ public interface IProjectManagementService
     Task<ProjectDashboardStats> DashboardAsync(CancellationToken ct = default);
 
     Task<IReadOnlyList<Project>> ListProjectsAsync(ProjectFilter? filter = null, CancellationToken ct = default);
+    Task<ProjectPage> QueryProjectsAsync(ProjectFilter? filter = null, CancellationToken ct = default);
     Task<Project?> GetProjectAsync(int id, CancellationToken ct = default);
     Task<Project> CreateProjectAsync(Project project, CancellationToken ct = default);
     Task<Project?> UpdateProjectAsync(int id, Project update, CancellationToken ct = default);
@@ -264,8 +268,16 @@ public sealed partial class ProjectManagementService : IProjectManagementService
 
     public async Task<IReadOnlyList<Project>> ListProjectsAsync(ProjectFilter? filter = null, CancellationToken ct = default)
     {
+        var page = await QueryProjectsAsync(filter, ct);
+        return page.Items;
+    }
+
+    public async Task<ProjectPage> QueryProjectsAsync(ProjectFilter? filter = null, CancellationToken ct = default)
+    {
         EnsureAccess(Permissions.ProjectsView);
         filter ??= new ProjectFilter();
+        var take = ListQuery.NormalizePageSize(filter.Take <= 0 ? 50 : filter.Take);
+        var skip = Math.Max(0, filter.Skip);
 
         var query = VisibleProjects(_db.Projects.AsNoTracking()).Include(p => p.Customer).AsQueryable();
 
@@ -279,20 +291,26 @@ public sealed partial class ProjectManagementService : IProjectManagementService
             query = query.Where(p => p.CustomerId == customerId);
         if (filter.ManagerUserId is { } managerId)
             query = query.Where(p => p.ManagerUserId == managerId);
-        if (!string.IsNullOrWhiteSpace(filter.Search))
+
+        var pattern = PagingQueryableExtensions.ToILikePattern(filter.Search);
+        if (pattern is not null)
         {
-            var term = filter.Search.Trim().ToLower();
             query = query.Where(p =>
-                p.Name.ToLower().Contains(term) ||
-                p.ProjectCode.ToLower().Contains(term) ||
-                (p.CustomerName != null && p.CustomerName.ToLower().Contains(term)));
+                EF.Functions.ILike(p.Name, pattern) ||
+                EF.Functions.ILike(p.ProjectCode, pattern) ||
+                (p.CustomerName != null && EF.Functions.ILike(p.CustomerName, pattern)) ||
+                (p.Tags != null && EF.Functions.ILike(p.Tags, pattern)) ||
+                (p.Department != null && EF.Functions.ILike(p.Department, pattern)));
         }
 
-        return await query
+        var ordered = query
             .OrderByDescending(p => p.ProjectStatus == ProjectStatus.Active)
-            .ThenByDescending(p => p.Id)
-            .Take(Math.Clamp(filter.Take, 1, 1000))
-            .ToListAsync(ct);
+            .ThenByDescending(p => p.Id);
+        var total = await ordered.CountAsync(ct);
+        var items = total == 0
+            ? new List<Project>()
+            : await ordered.Skip(skip).Take(take).ToListAsync(ct);
+        return new ProjectPage(items, total);
     }
 
     public async Task<Project?> GetProjectAsync(int id, CancellationToken ct = default)

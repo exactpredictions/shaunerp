@@ -105,7 +105,14 @@
         </table></div>
 
         <div class="form-actions">
-            <span class="muted">Showing @_items.Count of @_total</span>
+            <label class="grid-page-size">Rows
+                <select value="@_take" @onchange="OnPageSizeChanged">
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                </select>
+            </label>
+            <span class="muted">Showing @_items.Count of @_total.ToString("N0")</span>
             <button class="btn ghost" type="button" disabled="@(_skip == 0)" @onclick="PrevAsync">Previous</button>
             <button class="btn ghost" type="button" disabled="@(_skip + _take >= _total)" @onclick="NextAsync">Next</button>
         </div>
@@ -136,6 +143,16 @@
     private async Task ApplyAsync() { _skip = 0; await LoadAsync(); }
     private async Task NextAsync() { _skip += _take; await LoadAsync(); }
     private async Task PrevAsync() { _skip = Math.Max(0, _skip - _take); await LoadAsync(); }
+
+    private async Task OnPageSizeChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var size))
+        {
+            _take = ListQuery.NormalizePageSize(size);
+            _skip = 0;
+            await LoadAsync();
+        }
+    }
 
     private async Task LoadAsync()
     {

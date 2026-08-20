@@ -1,0 +1,70 @@
+@page "/crm/subscription-plans"
+@attribute [Authorize]
+@inject IRelationshipService Relationships
+
+<PageTitle>Subscription Plans — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM · Relationships</p>
+            <h1>Subscription Plans</h1>
+            <p class="muted">Membership plans and subscriber counts.</p>
+        </div>
+    </header>
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="muted">No subscription plans found.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Duration (months)</th>
+                        <th>Status</th>
+                        <th>Members</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var x in _items)
+                    {
+                        <tr>
+                            <td>@x.Name</td>
+                            <td>@x.DurationMonths</td>
+                            <td><span class="pill ok">@x.Status</span></td>
+                            <td>@x.MemberCount</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private List<SubscriptionPlanDto> _items = new();
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _items = (await Relationships.ListPlansAsync()).ToList();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

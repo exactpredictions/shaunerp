@@ -23,6 +23,9 @@ public class User : BaseEntity
     /// <summary>When true, login succeeds but clients should force a password change.</summary>
     public bool MustChangePassword { get; set; }
 
+    public int FailedLoginCount { get; set; }
+    public DateTime? LockoutEnd { get; set; }
+
     public ICollection<CompanyUser> CompanyUsers { get; set; } = new List<CompanyUser>();
     public ICollection<Session> Sessions { get; set; } = new List<Session>();
 }

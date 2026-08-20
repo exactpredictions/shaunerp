@@ -30,6 +30,12 @@
             @if (!string.IsNullOrEmpty(_ok)) { <div class="ok-msg">@_ok</div> }
 
             <h2 class="form-section">Basic information</h2>
+            @if (!_isNew && _model.PartyId is int partyId)
+            {
+                <p class="muted" style="margin:0 0 0.75rem">
+                    Identity · <a href="@($"/crm/people/{partyId}")">Party ID: P-@partyId.ToString("D6")</a>
+                </p>
+            }
             <div class="form-grid">
                 <label>Lead owner <InputText @bind-Value="_model.LeadOwner" /></label>
                 <label>Title <InputText @bind-Value="_model.Title" /></label>

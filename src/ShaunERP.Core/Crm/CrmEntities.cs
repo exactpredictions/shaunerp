@@ -48,6 +48,10 @@ public class Lead : BaseEntity
     public int? CampaignId { get; set; }
     public Campaign? Campaign { get; set; }
     public string? Tags { get; set; }
+
+    /// <summary>Permanent identity link. Nullable during migration; never remove Name/Phone/Email columns.</summary>
+    public int? PartyId { get; set; }
+    public ShaunERP.Core.Identity.Party? Party { get; set; }
 }
 
 /// <summary>Prospect — qualified lead actively engaged (ShaunERP sales stage).</summary>
@@ -72,6 +76,8 @@ public class Prospect : BaseEntity
     public int? AccountId { get; set; }
     public Account? Account { get; set; }
     public string? Tags { get; set; }
+    public int? PartyId { get; set; }
+    public ShaunERP.Core.Identity.Party? Party { get; set; }
 }
 
 /// <summary>Account — B2B organization (Salesforce / Dynamics Account, Zoho Account).</summary>
@@ -165,6 +171,8 @@ public class Contact : BaseEntity
     public string? Language { get; set; }
     public bool IsPrimary { get; set; }
     public string? Tags { get; set; }
+    public int? PartyId { get; set; }
+    public ShaunERP.Core.Identity.Party? Party { get; set; }
 }
 
 /// <summary>Opportunity — sales deal / pipeline item (Dynamics Opportunity, Zoho Deal).</summary>
@@ -212,6 +220,8 @@ public class Opportunity : BaseEntity
     public string? Territory { get; set; }
     public string? CurrencyCode { get; set; } = "USD";
     public string? Tags { get; set; }
+    public int? PartyId { get; set; }
+    public ShaunERP.Core.Identity.Party? Party { get; set; }
 }
 
 /// <summary>Customer — converted account after a won deal (ERP customer master).</summary>
@@ -239,6 +249,8 @@ public class Customer : BaseEntity
     public Account? Account { get; set; }
     public string? Tags { get; set; }
     public string? Description { get; set; }
+    public int? PartyId { get; set; }
+    public ShaunERP.Core.Identity.Party? Party { get; set; }
 }
 
 /// <summary>CRM task / to-do activity.</summary>

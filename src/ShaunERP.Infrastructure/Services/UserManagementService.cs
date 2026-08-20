@@ -45,6 +45,7 @@ public record RoleDto(int Id, string Name, string? Description, int? CompanyId);
 public interface IUserManagementService
 {
     Task<IReadOnlyList<UserListItem>> ListUsersAsync(CancellationToken ct = default);
+    Task<PagedResult<UserListItem>> QueryUsersAsync(ListQuery? query = null, CancellationToken ct = default);
     Task<UserListItem?> GetUserAsync(int id, CancellationToken ct = default);
     Task<(bool Ok, string? Error, UserListItem? User)> CreateUserAsync(CreateUserRequest request, CancellationToken ct = default);
     Task<(bool Ok, string? Error, UserListItem? User)> UpdateUserAsync(int id, UpdateUserRequest request, CancellationToken ct = default);
@@ -67,8 +68,15 @@ public class UserManagementService : IUserManagementService
 
     public async Task<IReadOnlyList<UserListItem>> ListUsersAsync(CancellationToken ct = default)
     {
+        var page = await QueryUsersAsync(new ListQuery { Page = 1, PageSize = 200 }, ct);
+        return page.Items;
+    }
+
+    public async Task<PagedResult<UserListItem>> QueryUsersAsync(ListQuery? query = null, CancellationToken ct = default)
+    {
         EnsureUsersAccess(Permissions.UsersView);
-        var query = _db.Users
+        query ??= new ListQuery();
+        var dbQuery = _db.Users
             .AsNoTracking()
             .Include(u => u.CompanyUsers).ThenInclude(cu => cu.Company)
             .Include(u => u.CompanyUsers).ThenInclude(cu => cu.UserRoles).ThenInclude(ur => ur.Role)
@@ -76,11 +84,43 @@ public class UserManagementService : IUserManagementService
 
         if (!_tenant.IsSystemAdmin && _tenant.CompanyId is int companyId)
         {
-            query = query.Where(u => u.CompanyUsers.Any(cu => cu.CompanyId == companyId));
+            dbQuery = dbQuery.Where(u => u.CompanyUsers.Any(cu => cu.CompanyId == companyId));
         }
 
-        var users = await query.OrderBy(u => u.Username).ToListAsync(ct);
-        return users.Select(Map).ToList();
+        var pattern = PagingQueryableExtensions.ToILikePattern(query.Search);
+        if (pattern is not null)
+        {
+            dbQuery = dbQuery.Where(u =>
+                EF.Functions.ILike(u.Username, pattern) ||
+                EF.Functions.ILike(u.Email, pattern) ||
+                EF.Functions.ILike(u.FirstName, pattern) ||
+                EF.Functions.ILike(u.LastName, pattern) ||
+                (u.PhoneNumber != null && EF.Functions.ILike(u.PhoneNumber, pattern)));
+        }
+
+        var ordered = dbQuery.OrderBy(u => u.Username);
+        var total = await ordered.CountAsync(ct);
+        var page = query.NormalizedPage;
+        var pageSize = query.NormalizedPageSize;
+        if (total == 0)
+        {
+            return PagedResult<UserListItem>.Empty(query);
+        }
+
+        var maxPage = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));
+        if (page > maxPage)
+        {
+            page = maxPage;
+        }
+
+        var users = await ordered.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+        return new PagedResult<UserListItem>
+        {
+            Items = users.Select(Map).ToList(),
+            TotalCount = total,
+            Page = page,
+            PageSize = pageSize
+        };
     }
 
     public async Task<UserListItem?> GetUserAsync(int id, CancellationToken ct = default)

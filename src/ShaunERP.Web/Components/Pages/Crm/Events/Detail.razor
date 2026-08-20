@@ -1,0 +1,145 @@
+@page "/crm/events/{Id:int}"
+@attribute [Authorize]
+@inject IRelationshipService Relationships
+
+<PageTitle>@(_event?.Name ?? "Event") — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM · Relationships</p>
+            <h1>@(_event?.Name ?? "Event")</h1>
+            @if (_event is not null)
+            {
+                <p class="muted">
+                    @if (_event.StartDate is not null)
+                    {
+                        <text>@_event.StartDate.Value.ToLocalTime().ToString("dd MMM yyyy")</text>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_event.Location))
+                    {
+                        <text> · @_event.Location</text>
+                    }
+                    · <span class="pill ok">@(_event.Status ?? "Active")</span>
+                </p>
+            }
+        </div>
+        <a class="btn ghost" href="/crm/events">Back to Events</a>
+    </header>
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_missing || _event is null)
+    {
+        <p class="alert">Event not found.</p>
+    }
+    else
+    {
+        @if (!string.IsNullOrWhiteSpace(_event.Description))
+        {
+            <p class="muted">@_event.Description</p>
+        }
+
+        <h2 class="form-section">Participants</h2>
+
+        <PagedListToolbar Query="_query" TotalCount="_total" Disabled="_loadingParticipants"
+                          SearchPlaceholder="Search participant name…"
+                          QueryChanged="OnQueryChangedAsync" />
+
+        @if (_loadingParticipants)
+        {
+            <p class="muted">Loading participants…</p>
+        }
+        else if (_participants.Count == 0)
+        {
+            <p class="muted">No participants for this event.</p>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Party ID</th>
+                            <th>Name</th>
+                            <th>Phone</th>
+                            <th>Email</th>
+                            <th>Registration</th>
+                            <th>Attendance</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var x in _participants)
+                        {
+                            <tr>
+                                <td><a href="@($"/crm/people/{x.PartyId}")">@x.PartyCode</a></td>
+                                <td>@x.DisplayName</td>
+                                <td>@(x.Phone ?? "—")</td>
+                                <td>@(x.Email ?? "—")</td>
+                                <td><span class="pill ok">@x.RegistrationStatus</span></td>
+                                <td>@(x.AttendanceStatus ?? "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+</section>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool _loading = true;
+    private bool _loadingParticipants = true;
+    private bool _missing;
+    private CrmEvent? _event;
+    private ListQuery _query = new();
+    private int _total;
+    private List<ParticipantListItemDto> _participants = new();
+
+    protected override async Task OnParametersSetAsync() => await ReloadAsync();
+
+    private async Task OnQueryChangedAsync(ListQuery query)
+    {
+        _query = query;
+        await ReloadParticipantsAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _loadingParticipants = true;
+        try
+        {
+            _event = await Relationships.GetEventAsync(Id);
+            _missing = _event is null;
+            if (_event is not null)
+            {
+                await ReloadParticipantsAsync();
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task ReloadParticipantsAsync()
+    {
+        _loadingParticipants = true;
+        try
+        {
+            var page = await Relationships.QueryParticipantsAsync(_query, eventId: Id);
+            _participants = page.Items.ToList();
+            _total = page.TotalCount;
+            _query = new ListQuery { Search = _query.Search, Page = page.Page, PageSize = page.PageSize };
+        }
+        finally
+        {
+            _loadingParticipants = false;
+        }
+    }
+}

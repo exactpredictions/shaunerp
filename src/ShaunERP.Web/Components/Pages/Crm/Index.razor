@@ -40,12 +40,17 @@
     else if (_stats is not null)
     {
         <div class="stat-grid crm-stats">
+            <a class="stat-card" href="/crm/people"><strong>@_stats.People</strong><span>People</span></a>
             <a class="stat-card" href="/crm/leads"><strong>@_stats.Leads</strong><span>Leads</span></a>
             <a class="stat-card" href="/crm/prospects"><strong>@_stats.Prospects</strong><span>Prospects</span></a>
+            <a class="stat-card" href="/crm/customers"><strong>@_stats.Customers</strong><span>Customers</span></a>
+            <a class="stat-card" href="/crm/identity-review"><strong>@_stats.PendingIdentityReviews</strong><span>Identity reviews</span></a>
+            <a class="stat-card" href="/crm/subscription-members"><strong>@_stats.SubscriptionMembers</strong><span>Subscribers (all)</span></a>
+            <a class="stat-card" href="/crm/subscription-members"><strong>@_stats.ActiveSubscribers</strong><span>Active subscribers</span></a>
+            <a class="stat-card" href="/crm/subscription-members"><strong>@_stats.InactiveSubscribers</strong><span>Inactive subscribers</span></a>
             <a class="stat-card" href="/crm/accounts"><strong>@_stats.Accounts</strong><span>Accounts</span></a>
             <a class="stat-card" href="/crm/contacts"><strong>@_stats.Contacts</strong><span>Contacts</span></a>
             <a class="stat-card" href="/crm/opportunities"><strong>@_stats.Opportunities</strong><span>Opportunities</span></a>
-            <a class="stat-card" href="/crm/customers"><strong>@_stats.Customers</strong><span>Customers</span></a>
             <a class="stat-card" href="/crm/campaigns"><strong>@_stats.Campaigns</strong><span>Campaigns</span></a>
             <a class="stat-card" href="/crm/cases"><strong>@_stats.OpenCases</strong><span>Open cases</span></a>
             <a class="stat-card" href="/crm/tasks"><strong>@_stats.OpenTasks</strong><span>Open tasks</span></a>

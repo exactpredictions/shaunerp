@@ -9,13 +9,13 @@
 <section class="page">
     <header class="page-head">
         <div><p class="eyebrow">Masters</p><h1>Chart of accounts / Ledgers</h1></div>
-        <div class="form-actions">
-            <input placeholder="Search ledgers" @bind="_search" @bind:event="oninput" />
-            <button class="btn ghost" @onclick="Reload">Search</button>
-        </div>
     </header>
 
     <ImportExportPanel EntityKey="ledgers" />
+
+    <PagedListToolbar Query="_query" TotalCount="_total" Disabled="_loading"
+                      SearchPlaceholder="Search code, name, GSTIN, PAN, bank…"
+                      QueryChanged="OnQueryChangedAsync" />
 
     @if (_error is not null) { <div class="error-state">@_error</div> }
     else if (_loading) { <div class="loading-state">Loading…</div> }
@@ -39,27 +39,30 @@
             </div>
             <button class="btn" @onclick="CreateAsync">Create ledger</button>
         </div>
-        <table class="data-table">
-            <thead><tr><th>Code</th><th>Name</th><th>Group</th><th>Type</th><th>System</th></tr></thead>
-            <tbody>
-            @foreach (var l in _ledgers)
-            {
-                <tr>
-                    <td>@l.LedgerCode</td>
-                    <td>@l.LedgerName</td>
-                    <td>@(l.AccountGroup?.GroupName ?? "—")</td>
-                    <td>@l.AccountType</td>
-                    <td>@(l.IsSystemLedger ? "Yes" : "")</td>
-                </tr>
-            }
-            </tbody>
-        </table>
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead><tr><th>Code</th><th>Name</th><th>Group</th><th>Type</th><th>System</th></tr></thead>
+                <tbody>
+                @foreach (var l in _ledgers)
+                {
+                    <tr>
+                        <td>@l.LedgerCode</td>
+                        <td>@l.LedgerName</td>
+                        <td>@(l.AccountGroup?.GroupName ?? "—")</td>
+                        <td>@l.AccountType</td>
+                        <td>@(l.IsSystemLedger ? "Yes" : "")</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
     }
 </section>
 @code {
     private bool _loading = true;
     private string? _error;
-    private string? _search;
+    private ListQuery _query = new();
+    private int _total;
     private List<Ledger> _ledgers = new();
     private List<AccountGroup> _groups = new();
     private Ledger _new = new();
@@ -74,15 +77,29 @@
             await Accounting.EnsureBootstrapAsync();
             _groups = (await Accounting.ListGroupsAsync()).ToList();
             if (_groups.Count > 0) _new.AccountGroupId = _groups[0].Id;
-            await Reload();
+            await ReloadAsync();
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _loading = false; }
     }
 
-    private async Task Reload()
+    private async Task OnQueryChangedAsync(ListQuery query)
     {
-        _ledgers = (await Accounting.ListLedgersAsync(_search)).ToList();
+        _query = query;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var page = await Accounting.QueryLedgersAsync(_query);
+            _ledgers = page.Items.ToList();
+            _total = page.TotalCount;
+            _query = new ListQuery { Search = _query.Search, Page = page.Page, PageSize = page.PageSize };
+        }
+        finally { _loading = false; }
     }
 
     private async Task CreateAsync()
@@ -91,7 +108,7 @@
         {
             await Accounting.UpsertLedgerAsync(_new);
             _new = new Ledger { AccountGroupId = _groups.FirstOrDefault()?.Id ?? 0 };
-            await Reload();
+            await ReloadAsync();
         }
         catch (Exception ex) { _error = ex.Message; }
     }

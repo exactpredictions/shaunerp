@@ -1,0 +1,87 @@
+@page "/crm/events"
+@attribute [Authorize]
+@inject IRelationshipService Relationships
+
+<PageTitle>Events — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM · Relationships</p>
+            <h1>Events</h1>
+            <p class="muted">CRM events and participant counts.</p>
+        </div>
+    </header>
+
+    <PagedListToolbar Query="_query" TotalCount="_total" Disabled="_loading"
+                      SearchPlaceholder="Search event name…"
+                      QueryChanged="OnQueryChangedAsync" />
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="muted">No events match the current search.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Start</th>
+                        <th>Status</th>
+                        <th>Participants</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var x in _items)
+                    {
+                        <tr>
+                            <td>@x.Name</td>
+                            <td>@(x.StartDate?.ToLocalTime().ToString("dd MMM yyyy") ?? "—")</td>
+                            <td><span class="pill ok">@x.Status</span></td>
+                            <td>@x.ParticipantCount</td>
+                            <td><a href="@($"/crm/events/{x.Id}")">Open</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private ListQuery _query = new();
+    private int _total;
+    private List<EventListItemDto> _items = new();
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task OnQueryChangedAsync(ListQuery query)
+    {
+        _query = query;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var page = await Relationships.QueryEventsAsync(_query);
+            _items = page.Items.ToList();
+            _total = page.TotalCount;
+            _query = new ListQuery { Search = _query.Search, Page = page.Page, PageSize = page.PageSize };
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

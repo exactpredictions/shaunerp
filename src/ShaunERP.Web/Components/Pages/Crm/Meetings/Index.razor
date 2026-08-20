@@ -13,8 +13,18 @@
         <a class="btn" href="/crm/meetings/new">Add meeting</a>
     </header>
 
-    @if (_loading) { <p class="muted">Loading…</p> }
-    else if (_items.Count == 0) { <p class="muted">No meetings yet.</p> }
+    <PagedListToolbar Query="_query" TotalCount="_total" Disabled="_loading"
+                      SearchPlaceholder="Search title, location, host…"
+                      QueryChanged="OnQueryChangedAsync" />
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="muted">No matching rows.</p>
+    }
     else
     {
         <div class="table-wrap">
@@ -22,10 +32,9 @@
                 <thead>
                     <tr>
                         <th>Title</th>
+                        <th>Location</th>
                         <th>Host</th>
                         <th>From</th>
-                        <th>Location</th>
-                        <th>Type</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -34,10 +43,9 @@
                     {
                         <tr>
                             <td>@(x.Title ?? "—")</td>
-                            <td>@(x.Host ?? "—")</td>
-                            <td>@(x.From?.ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
                             <td>@(x.Location ?? "—")</td>
-                            <td>@(x.MeetingType ?? "—")</td>
+                            <td>@(x.Host ?? "—")</td>
+                            <td>@(x.From?.ToString("g") ?? "—")</td>
                             <td><a href="@($"/crm/meetings/{x.Id}")">Edit</a></td>
                         </tr>
                     }
@@ -49,10 +57,31 @@
 
 @code {
     private bool _loading = true;
+    private ListQuery _query = new();
+    private int _total;
     private List<Meeting> _items = new();
-    protected override async Task OnInitializedAsync()
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task OnQueryChangedAsync(ListQuery query)
     {
-        _items = (await Crm.ListMeetingsAsync()).ToList();
-        _loading = false;
+        _query = query;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var page = await Crm.QueryMeetingsAsync(_query);
+            _items = page.Items.ToList();
+            _total = page.TotalCount;
+            _query = new ListQuery { Search = _query.Search, Page = page.Page, PageSize = page.PageSize };
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 }

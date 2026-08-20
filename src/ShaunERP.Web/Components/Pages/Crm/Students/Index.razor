@@ -1,0 +1,155 @@
+@page "/crm/students"
+@attribute [Authorize]
+@inject IRelationshipService Relationships
+
+<PageTitle>Students — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM · Relationships</p>
+            <h1>Students</h1>
+            <p class="muted">Course enrollments across all programs.</p>
+        </div>
+    </header>
+
+    <div class="grid-toolbar" style="flex-wrap:wrap;gap:0.75rem;margin-bottom:0.75rem">
+        <label class="grid-page-size">
+            <span>Course</span>
+            <select value="@_programFilter" @onchange="OnProgramFilterChanged" disabled="@_loading">
+                <option value="">All courses</option>
+                @foreach (var p in _programs)
+                {
+                    <option value="@p.Id">@p.Name</option>
+                }
+            </select>
+        </label>
+        <label class="grid-page-size">
+            <span>Status</span>
+            <select value="@_statusFilter" @onchange="OnStatusFilterChanged" disabled="@_loading">
+                <option value="All">All</option>
+                <option value="@EnrollmentStatuses.Active">Active</option>
+                <option value="@EnrollmentStatuses.Completed">Completed</option>
+                <option value="@EnrollmentStatuses.Cancelled">Cancelled</option>
+                <option value="@EnrollmentStatuses.Historical">Historical</option>
+            </select>
+        </label>
+    </div>
+
+    <PagedListToolbar Query="_query" TotalCount="_total" Disabled="_loading"
+                      SearchPlaceholder="Search name, phone, email, course, or Party ID…"
+                      QueryChanged="OnQueryChangedAsync" />
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="muted">No students match the current filters.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Party ID</th>
+                        <th>Name</th>
+                        <th>Phone</th>
+                        <th>Email</th>
+                        <th>Course</th>
+                        <th>Status</th>
+                        <th>Source</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var x in _items)
+                    {
+                        <tr>
+                            <td><a href="@($"/crm/people/{x.PartyId}")">@x.PartyCode</a></td>
+                            <td>@x.DisplayName</td>
+                            <td>@(x.Phone ?? "—")</td>
+                            <td>@(x.Email ?? "—")</td>
+                            <td><a href="@($"/crm/courses/{x.ProgramId}")">@x.ProgramName</a></td>
+                            <td><span class="pill ok">@x.EnrollmentStatus</span></td>
+                            <td>@(x.Source ?? "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private EnrollmentListQuery _query = new();
+    private string _programFilter = string.Empty;
+    private string _statusFilter = "All";
+    private int _total;
+    private List<EnrollmentListItemDto> _items = new();
+    private List<ProgramListItemDto> _programs = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var programsPage = await Relationships.QueryProgramsAsync(new ListQuery { PageSize = 500 });
+        _programs = programsPage.Items.ToList();
+        await ReloadAsync();
+    }
+
+    private async Task OnQueryChangedAsync(ListQuery query)
+    {
+        _query = new EnrollmentListQuery
+        {
+            Search = query.Search,
+            Page = query.NormalizedPage,
+            PageSize = query.NormalizedPageSize,
+            ProgramId = ParseProgramId(_programFilter),
+            EnrollmentStatus = _statusFilter
+        };
+        await ReloadAsync();
+    }
+
+    private async Task OnProgramFilterChanged(ChangeEventArgs e)
+    {
+        _programFilter = e.Value?.ToString() ?? string.Empty;
+        _query.ProgramId = ParseProgramId(_programFilter);
+        await ReloadAsync();
+    }
+
+    private async Task OnStatusFilterChanged(ChangeEventArgs e)
+    {
+        _statusFilter = e.Value?.ToString() ?? "All";
+        _query.EnrollmentStatus = _statusFilter;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _query.ProgramId = ParseProgramId(_programFilter);
+            _query.EnrollmentStatus = _statusFilter;
+            var page = await Relationships.QueryEnrollmentsAsync(_query);
+            _items = page.Items.ToList();
+            _total = page.TotalCount;
+            _query = new EnrollmentListQuery
+            {
+                Search = _query.Search,
+                Page = page.Page,
+                PageSize = page.PageSize,
+                ProgramId = ParseProgramId(_programFilter),
+                EnrollmentStatus = _statusFilter
+            };
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static int? ParseProgramId(string value)
+        => int.TryParse(value, out var id) && id > 0 ? id : null;
+}

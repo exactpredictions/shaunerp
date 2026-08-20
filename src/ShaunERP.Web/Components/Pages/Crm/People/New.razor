@@ -1,0 +1,62 @@
+@page "/crm/people/new"
+@attribute [Authorize]
+@inject IPartyDirectoryService People
+@inject NavigationManager Nav
+
+<PageTitle>Add person — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM · Identity</p>
+            <h1>Add person</h1>
+            <p class="muted">Creates a permanent identity only — does not create a Lead or Customer.</p>
+        </div>
+        <a class="btn ghost" href="/crm/people">Back</a>
+    </header>
+
+    <EditForm Model="_model" OnValidSubmit="SaveAsync" class="form-card">
+        @if (!string.IsNullOrEmpty(_error)) { <div class="alert">@_error</div> }
+        <div class="form-grid">
+            <label>First name <InputText @bind-Value="_model.FirstName" /></label>
+            <label>Last name <InputText @bind-Value="_model.LastName" /></label>
+            <label>Phone <InputText @bind-Value="_model.Phone" /></label>
+            <label>Email <InputText @bind-Value="_model.Email" /></label>
+        </div>
+        <div class="form-actions">
+            <button class="btn" type="submit" disabled="@_saving">Create person</button>
+        </div>
+    </EditForm>
+</section>
+
+@code {
+    private readonly CreatePersonRequest _model = new();
+    private string? _error;
+    private bool _saving;
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        _saving = true;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_model.FirstName) && string.IsNullOrWhiteSpace(_model.LastName)
+                && string.IsNullOrWhiteSpace(_model.Phone) && string.IsNullOrWhiteSpace(_model.Email))
+            {
+                _error = "Enter at least a name, phone, or email.";
+                return;
+            }
+
+            var id = await People.CreatePersonAsync(_model);
+            Nav.NavigateTo($"/crm/people/{id}");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

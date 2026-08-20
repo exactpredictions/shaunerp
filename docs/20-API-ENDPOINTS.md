@@ -130,13 +130,41 @@ Same CRUD pattern:
 
 **Not implemented** (despite README mention): `/api/finance/vendors`, `/api/finance/bills`, `/api/finance/accounts`, `/api/finance/books`
 
-## Sales Orders — ❌ NO REST API
+## Sales Orders — `/api/orders`
 
-Use Blazor Web UI only. Service: `ISalesOrderService`.
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/orders/dashboard` | Order stats |
+| GET | `/api/orders` | List sales orders |
+| GET | `/api/orders/{id}` | Get order |
+| POST | `/api/orders` | Create order |
+| PUT | `/api/orders/{id}` | Update order |
+| DELETE | `/api/orders/{id}` | Delete draft |
+| POST | `/api/orders/{id}/confirm` | Confirm |
+| POST | `/api/orders/{id}/fulfill` | Fulfill |
+| POST | `/api/orders/{id}/cancel` | Cancel |
+| POST | `/api/orders/{id}/invoice` | Create invoice from order |
+| POST | `/api/orders/from-quote/{quoteId}` | Create order from an **Accepted** quote |
 
-## Accounting — ❌ NO REST API
+## Accounting — `/api/accounting`
 
-Use Blazor Web UI only. Services: `IAccountingService`, `IAccountingPostingService`, `IAccountingReportService`.
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/accounting/dashboard` | Cash/bank/AR/AP snapshot |
+| GET | `/api/accounting/ledgers` | Chart of accounts (`?search=`) |
+| GET | `/api/accounting/ledgers/{id}` | Get ledger |
+| GET | `/api/accounting/vouchers` | List vouchers (`?typeCode=`) |
+| GET | `/api/accounting/vouchers/{id}` | Get voucher |
+| POST | `/api/accounting/vouchers` | Post a voucher (`AccountingPostingRequest`) |
+| POST | `/api/accounting/vouchers/{id}/post` | Post a draft |
+| POST | `/api/accounting/vouchers/{id}/reverse` | Reverse a posted voucher |
+| GET | `/api/accounting/reports/trial-balance` | Trial balance |
+| GET | `/api/accounting/reports/profit-loss` | Profit & loss |
+| GET | `/api/accounting/reports/balance-sheet` | Balance sheet |
+
+Login lockout: 5 failed attempts lock the account for 15 minutes (`Account is locked. Try again later.`).
+
+Public register remains **off** in production unless `ALLOW_PUBLIC_REGISTER=true`. Swagger is off unless Development or `ENABLE_SWAGGER=true` (and not `DISABLE_SWAGGER=true`). Production CORS uses `Cors:Origins` / `Jwt:Cors:Origins` (not AllowAnyOrigin).
 
 ## Web-only endpoints (cookie auth)
 

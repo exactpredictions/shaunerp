@@ -9,7 +9,7 @@
 
     @if (HasError)
     {
-        <div class="alert">Invalid username or password.</div>
+        <div class="alert">@ErrorText</div>
     }
 
     <form method="post" action="/account/login">
@@ -30,5 +30,8 @@
     [SupplyParameterFromQuery(Name = "error")]
     public string? Error { get; set; }
 
-    private bool HasError => Error == "1";
+    private bool HasError => !string.IsNullOrWhiteSpace(Error);
+    private string ErrorText => Error is "locked"
+        ? "Account locked after too many failed sign-ins. Try again in 15 minutes."
+        : "Invalid username or password.";
 }

@@ -101,16 +101,49 @@ public class AuthService : IAuthService
         return await IssueTokenAsync(user, companyId, ct);
     }
 
+    public const int MaxFailedLogins = 5;
+    public static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
+
     public async Task<AuthResult> LoginAsync(LoginRequest request, CancellationToken ct = default)
     {
         var key = request.UsernameOrEmail.Trim().ToLowerInvariant();
         var user = await _db.Users.FirstOrDefaultAsync(
             u => u.Username.ToLower() == key || u.Email.ToLower() == key, ct);
 
-        if (user is null || !user.IsActive || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+        if (user is null || !user.IsActive)
         {
             return new AuthResult(false, null, null, "Invalid credentials.", null, null, null);
         }
+
+        if (user.LockoutEnd is { } until && until > DateTime.UtcNow)
+        {
+            return new AuthResult(false, null, null, "Account is locked. Try again later.", null, null, null);
+        }
+
+        if (!BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+        {
+            user.FailedLoginCount++;
+            if (user.FailedLoginCount >= MaxFailedLogins)
+            {
+                user.LockoutEnd = DateTime.UtcNow.Add(LockoutDuration);
+                user.FailedLoginCount = 0;
+                await _db.SaveChangesAsync(ct);
+                await _audit.WriteAsync(
+                    "auth.lockout",
+                    userId: user.Id,
+                    entityType: "User",
+                    entityId: user.Id.ToString(),
+                    ct: ct);
+                return new AuthResult(false, null, null, "Account is locked. Try again later.", null, null, null);
+            }
+
+            await _db.SaveChangesAsync(ct);
+            return new AuthResult(false, null, null, "Invalid credentials.", null, null, null);
+        }
+
+        user.FailedLoginCount = 0;
+        user.LockoutEnd = null;
+        await _db.SaveChangesAsync(ct);
 
         var result = await IssueTokenAsync(user, request.CompanyId, ct);
         if (result.Success)

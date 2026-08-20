@@ -5,6 +5,7 @@ using ShaunERP.Core.Finance;
 using ShaunERP.Core.Identity;
 using ShaunERP.Core.Platform;
 using ShaunERP.Infrastructure.Persistence;
+using ShaunERP.Infrastructure.Services.Identity;
 using CrmAccount = ShaunERP.Core.Crm.Account;
 using GlAccount = ShaunERP.Core.Finance.Account;
 
@@ -30,6 +31,9 @@ public class DbSeeder
         await EnsureSalesOrderSchemaAsync(ct);
         await AccountingSchema.EnsureAsync(_db, _logger, ct);
         await ProjectsSchema.EnsureAsync(_db, _logger, ct);
+        await PartySchema.EnsureAsync(_db, _logger, ct);
+        await RelationshipSchema.EnsureAsync(_db, _logger, ct);
+        await EnsureDefaultSubscriptionPlansAsync(ct);
         await EnsureRolesAndPermissionsAsync(ct);
         await NormalizeCompanyModulesAsync(ct);
 
@@ -137,6 +141,57 @@ public class DbSeeder
 
         await AssignOrphanCrmToFirstCompanyAsync(ct);
         await AssignOrphanFinanceToFirstCompanyAsync(ct);
+    }
+
+    private async Task EnsureDefaultSubscriptionPlansAsync(CancellationToken ct)
+    {
+        var companyIds = await _db.Companies.AsNoTracking().Select(c => c.Id).ToListAsync(ct);
+        var defaults = new (string Name, int Months)[]
+        {
+            ("Monthly", 1),
+            ("2 Months", 2),
+            ("3 Months", 3),
+            ("6 Months", 6),
+            ("1 Year", 12)
+        };
+
+        foreach (var companyId in companyIds)
+        {
+            foreach (var (name, months) in defaults)
+            {
+                if (await _db.SubscriptionPlans.AnyAsync(p => p.CompanyId == companyId && p.Name == name, ct))
+                {
+                    continue;
+                }
+
+                _db.SubscriptionPlans.Add(new SubscriptionPlan
+                {
+                    CompanyId = companyId,
+                    Name = name,
+                    DurationMonths = months,
+                    Status = "Active",
+                    CreatedDate = DateTime.UtcNow,
+                    Description = $"{name} astrology software subscription plan"
+                });
+            }
+
+            if (!await _db.SubscriptionPlans.AnyAsync(p =>
+                    p.CompanyId == companyId && p.Name == SubscriptionPlanNames.ExactPredictionsPremiumHistorical, ct))
+            {
+                _db.SubscriptionPlans.Add(new SubscriptionPlan
+                {
+                    CompanyId = companyId,
+                    Name = SubscriptionPlanNames.ExactPredictionsPremiumHistorical,
+                    DurationMonths = 0,
+                    Status = "Active",
+                    ProductSku = "exactpredictions-premium-historical",
+                    CreatedDate = DateTime.UtcNow,
+                    Description = "Historical ExactPredictions premium membership when specific plan duration is unknown"
+                });
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
     }
 
     private async Task EnsureRolesAndPermissionsAsync(CancellationToken ct)
@@ -1095,6 +1150,12 @@ public class DbSeeder
 
         await _db.Database.ExecuteSqlRawAsync("""
             ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "MustChangePassword" boolean NOT NULL DEFAULT FALSE;
+            """, ct);
+        await _db.Database.ExecuteSqlRawAsync("""
+            ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "FailedLoginCount" integer NOT NULL DEFAULT 0;
+            """, ct);
+        await _db.Database.ExecuteSqlRawAsync("""
+            ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "LockoutEnd" timestamp with time zone NULL;
             """, ct);
     }
 

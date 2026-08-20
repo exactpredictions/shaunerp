@@ -117,7 +117,8 @@ app.MapPost("/account/login", async (HttpContext http, AuthSessionService auth) 
     var result = await auth.ValidateAsync(username, password);
     if (!result.Success || result.Principal is null)
     {
-        return Results.Redirect("/login?error=1");
+        var locked = result.Error?.Contains("locked", StringComparison.OrdinalIgnoreCase) == true;
+        return Results.Redirect(locked ? "/login?error=locked" : "/login?error=1");
     }
 
     await http.SignInAsync(

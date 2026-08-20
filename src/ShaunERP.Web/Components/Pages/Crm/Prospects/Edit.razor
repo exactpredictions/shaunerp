@@ -23,6 +23,13 @@
             @if (!string.IsNullOrEmpty(_error)) { <div class="alert">@_error</div> }
             @if (!string.IsNullOrEmpty(_ok)) { <div class="ok-msg">@_ok</div> }
 
+            @if (!_isNew && _model.PartyId is int partyId)
+            {
+                <p class="muted" style="margin:0 0 0.75rem">
+                    Identity · <a href="@($"/crm/people/{partyId}")">Party ID: P-@partyId.ToString("D6")</a>
+                </p>
+            }
+
             <div class="form-grid">
                 <label>Company name <InputText @bind-Value="_model.CompanyName" required /></label>
                 <label>Lead ID <InputNumber @bind-Value="_model.LeadId" /></label>

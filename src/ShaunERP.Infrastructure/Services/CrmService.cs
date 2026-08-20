@@ -1,8 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using ShaunERP.Core.Crm;
+using ShaunERP.Core.Identity;
 using ShaunERP.Core.Platform;
 using ShaunERP.Infrastructure.Persistence;
 using ShaunERP.Infrastructure.Platform;
+using ShaunERP.Infrastructure.Services.Identity;
 
 namespace ShaunERP.Infrastructure.Services;
 
@@ -13,6 +15,7 @@ public interface ICrmService
     Task<CrmForecastStats> GetForecastAsync(CancellationToken ct = default);
 
     Task<IReadOnlyList<Lead>> ListLeadsAsync(CancellationToken ct = default);
+    Task<PagedResult<Lead>> QueryLeadsAsync(ListQuery? query = null, CancellationToken ct = default);
     Task<Lead?> GetLeadAsync(int id, CancellationToken ct = default);
     Task<Lead> CreateLeadAsync(Lead lead, CancellationToken ct = default);
     Task<Lead?> UpdateLeadAsync(int id, Lead update, CancellationToken ct = default);
@@ -22,24 +25,28 @@ public interface ICrmService
     Task<(bool Ok, string? Error, Prospect? Prospect)> ConvertLeadToProspectAsync(int leadId, CancellationToken ct = default);
 
     Task<IReadOnlyList<Prospect>> ListProspectsAsync(CancellationToken ct = default);
+    Task<PagedResult<Prospect>> QueryProspectsAsync(ListQuery? query = null, CancellationToken ct = default);
     Task<Prospect?> GetProspectAsync(int id, CancellationToken ct = default);
     Task<Prospect> CreateProspectAsync(Prospect prospect, CancellationToken ct = default);
     Task<Prospect?> UpdateProspectAsync(int id, Prospect update, CancellationToken ct = default);
     Task<bool> DeleteProspectAsync(int id, CancellationToken ct = default);
 
     Task<IReadOnlyList<Account>> ListAccountsAsync(CancellationToken ct = default);
+    Task<PagedResult<Account>> QueryAccountsAsync(ListQuery? query = null, CancellationToken ct = default);
     Task<Account?> GetAccountAsync(int id, CancellationToken ct = default);
     Task<Account> CreateAccountAsync(Account account, CancellationToken ct = default);
     Task<Account?> UpdateAccountAsync(int id, Account update, CancellationToken ct = default);
     Task<bool> DeleteAccountAsync(int id, CancellationToken ct = default);
 
     Task<IReadOnlyList<Contact>> ListContactsAsync(CancellationToken ct = default);
+    Task<PagedResult<Contact>> QueryContactsAsync(ListQuery? query = null, CancellationToken ct = default);
     Task<Contact?> GetContactAsync(int id, CancellationToken ct = default);
     Task<Contact> CreateContactAsync(Contact contact, CancellationToken ct = default);
     Task<Contact?> UpdateContactAsync(int id, Contact update, CancellationToken ct = default);
     Task<bool> DeleteContactAsync(int id, CancellationToken ct = default);
 
     Task<IReadOnlyList<Opportunity>> ListOpportunitiesAsync(CancellationToken ct = default);
+    Task<PagedResult<Opportunity>> QueryOpportunitiesAsync(ListQuery? query = null, CancellationToken ct = default);
     Task<Opportunity?> GetOpportunityAsync(int id, CancellationToken ct = default);
     Task<Opportunity> CreateOpportunityAsync(Opportunity deal, CancellationToken ct = default);
     Task<Opportunity?> UpdateOpportunityAsync(int id, Opportunity update, CancellationToken ct = default);
@@ -51,54 +58,63 @@ public interface ICrmService
     Task<Opportunity?> MoveOpportunityStageAsync(int id, string stage, CancellationToken ct = default);
 
     Task<IReadOnlyList<Customer>> ListCustomersAsync(CancellationToken ct = default);
+    Task<PagedResult<Customer>> QueryCustomersAsync(ListQuery? query = null, CancellationToken ct = default);
     Task<Customer?> GetCustomerAsync(int id, CancellationToken ct = default);
     Task<Customer> CreateCustomerAsync(Customer customer, CancellationToken ct = default);
     Task<Customer?> UpdateCustomerAsync(int id, Customer update, CancellationToken ct = default);
     Task<bool> DeleteCustomerAsync(int id, CancellationToken ct = default);
 
     Task<IReadOnlyList<Campaign>> ListCampaignsAsync(CancellationToken ct = default);
+    Task<PagedResult<Campaign>> QueryCampaignsAsync(ListQuery? query = null, CancellationToken ct = default);
     Task<Campaign?> GetCampaignAsync(int id, CancellationToken ct = default);
     Task<Campaign> CreateCampaignAsync(Campaign campaign, CancellationToken ct = default);
     Task<Campaign?> UpdateCampaignAsync(int id, Campaign update, CancellationToken ct = default);
     Task<bool> DeleteCampaignAsync(int id, CancellationToken ct = default);
 
     Task<IReadOnlyList<CrmProduct>> ListProductsAsync(CancellationToken ct = default);
+    Task<PagedResult<CrmProduct>> QueryProductsAsync(ListQuery? query = null, CancellationToken ct = default);
     Task<CrmProduct?> GetProductAsync(int id, CancellationToken ct = default);
     Task<CrmProduct> CreateProductAsync(CrmProduct product, CancellationToken ct = default);
     Task<CrmProduct?> UpdateProductAsync(int id, CrmProduct update, CancellationToken ct = default);
     Task<bool> DeleteProductAsync(int id, CancellationToken ct = default);
 
     Task<IReadOnlyList<Quote>> ListQuotesAsync(CancellationToken ct = default);
+    Task<PagedResult<Quote>> QueryQuotesAsync(ListQuery? query = null, CancellationToken ct = default);
     Task<Quote?> GetQuoteAsync(int id, CancellationToken ct = default);
     Task<Quote> CreateQuoteAsync(Quote quote, CancellationToken ct = default);
     Task<Quote?> UpdateQuoteAsync(int id, Quote update, CancellationToken ct = default);
     Task<bool> DeleteQuoteAsync(int id, CancellationToken ct = default);
 
     Task<IReadOnlyList<CrmCase>> ListCasesAsync(CancellationToken ct = default);
+    Task<PagedResult<CrmCase>> QueryCasesAsync(ListQuery? query = null, CancellationToken ct = default);
     Task<CrmCase?> GetCaseAsync(int id, CancellationToken ct = default);
     Task<CrmCase> CreateCaseAsync(CrmCase crmCase, CancellationToken ct = default);
     Task<CrmCase?> UpdateCaseAsync(int id, CrmCase update, CancellationToken ct = default);
     Task<bool> DeleteCaseAsync(int id, CancellationToken ct = default);
 
     Task<IReadOnlyList<CrmTask>> ListTasksAsync(CancellationToken ct = default);
+    Task<PagedResult<CrmTask>> QueryTasksAsync(ListQuery? query = null, CancellationToken ct = default);
     Task<CrmTask?> GetTaskAsync(int id, CancellationToken ct = default);
     Task<CrmTask> CreateTaskAsync(CrmTask task, CancellationToken ct = default);
     Task<CrmTask?> UpdateTaskAsync(int id, CrmTask update, CancellationToken ct = default);
     Task<bool> DeleteTaskAsync(int id, CancellationToken ct = default);
 
     Task<IReadOnlyList<Meeting>> ListMeetingsAsync(CancellationToken ct = default);
+    Task<PagedResult<Meeting>> QueryMeetingsAsync(ListQuery? query = null, CancellationToken ct = default);
     Task<Meeting?> GetMeetingAsync(int id, CancellationToken ct = default);
     Task<Meeting> CreateMeetingAsync(Meeting meeting, CancellationToken ct = default);
     Task<Meeting?> UpdateMeetingAsync(int id, Meeting update, CancellationToken ct = default);
     Task<bool> DeleteMeetingAsync(int id, CancellationToken ct = default);
 
     Task<IReadOnlyList<CrmCall>> ListCallsAsync(CancellationToken ct = default);
+    Task<PagedResult<CrmCall>> QueryCallsAsync(ListQuery? query = null, CancellationToken ct = default);
     Task<CrmCall?> GetCallAsync(int id, CancellationToken ct = default);
     Task<CrmCall> CreateCallAsync(CrmCall call, CancellationToken ct = default);
     Task<CrmCall?> UpdateCallAsync(int id, CrmCall update, CancellationToken ct = default);
     Task<bool> DeleteCallAsync(int id, CancellationToken ct = default);
 
     Task<IReadOnlyList<CrmNote>> ListNotesAsync(string? relatedType = null, int? relatedId = null, CancellationToken ct = default);
+    Task<PagedResult<CrmNote>> QueryNotesAsync(ListQuery? query = null, string? relatedType = null, int? relatedId = null, CancellationToken ct = default);
     Task<CrmNote?> GetNoteAsync(int id, CancellationToken ct = default);
     Task<CrmNote> CreateNoteAsync(CrmNote note, CancellationToken ct = default);
     Task<CrmNote?> UpdateNoteAsync(int id, CrmNote update, CancellationToken ct = default);
@@ -119,7 +135,12 @@ public record CrmDashboardStats(
     int CallsThisWeek,
     decimal PipelineAmount,
     decimal WeightedPipeline,
-    decimal WonThisMonth);
+    decimal WonThisMonth,
+    int People = 0,
+    int PendingIdentityReviews = 0,
+    int SubscriptionMembers = 0,
+    int ActiveSubscribers = 0,
+    int InactiveSubscribers = 0);
 
 public record CrmPipelineColumn(string Stage, int Count, decimal Amount, IReadOnlyList<Opportunity> Deals);
 
@@ -158,17 +179,23 @@ public partial class CrmService : ICrmService
     private readonly ShaunErpDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly IModuleRegistry _modules;
+    private readonly IPartyIdentityService _parties;
 
     public static readonly string[] StandardStages =
     [
         "Qualification", "Needs Analysis", "Proposal", "Negotiation", "Closed Won", "Closed Lost"
     ];
 
-    public CrmService(ShaunErpDbContext db, ITenantContext tenant, IModuleRegistry modules)
+    public CrmService(
+        ShaunErpDbContext db,
+        ITenantContext tenant,
+        IModuleRegistry modules,
+        IPartyIdentityService parties)
     {
         _db = db;
         _tenant = tenant;
         _modules = modules;
+        _parties = parties;
     }
 
     public async Task<CrmDashboardStats> GetDashboardAsync(CancellationToken ct = default)
@@ -192,6 +219,17 @@ public partial class CrmService : ICrmService
 
         var openDeals = opportunities.Where(o => o.Stage != "Closed Won" && o.Stage != "Closed Lost");
 
+        var people = await _db.Parties.AsNoTracking()
+            .CountAsync(p => p.CompanyId == RequireCompanyId() && p.PartyType == PartyTypes.Person, ct);
+        var pendingReviews = await _db.ImportMatchReviews.AsNoTracking()
+            .CountAsync(r => r.CompanyId == RequireCompanyId() && r.ReviewStatus == "Pending", ct);
+        var companyId = RequireCompanyId();
+        var subscriptionMembers = await _db.SubscriptionMemberships.AsNoTracking()
+            .CountAsync(m => m.CompanyId == companyId, ct);
+        var activeSubscribers = await _db.SubscriptionMemberships.AsNoTracking()
+            .CountAsync(m => m.CompanyId == companyId && m.MembershipStatus == MembershipStatuses.Active, ct);
+        var inactiveSubscribers = subscriptionMembers - activeSubscribers;
+
         return new CrmDashboardStats(
             await leads.CountAsync(ct),
             await prospects.CountAsync(ct),
@@ -206,8 +244,12 @@ public partial class CrmService : ICrmService
             await calls.CountAsync(c => c.CallStart != null && c.CallStart >= weekStart, ct),
             await openDeals.SumAsync(o => (decimal?)o.Amount, ct) ?? 0m,
             await openDeals.SumAsync(o => (decimal?)(o.Amount * (decimal)((o.Probability ?? 0) / 100.0)), ct) ?? 0m,
-            await opportunities.Where(o => o.Stage == "Closed Won" && o.ActualCloseDate >= monthStart)
-                .SumAsync(o => (decimal?)(o.ActualRevenue ?? o.Amount), ct) ?? 0m);
+            await opportunities.Where(o => o.Stage == "Closed Won" && o.ActualCloseDate >= monthStart).SumAsync(o => (decimal?)(o.ActualRevenue ?? o.Amount), ct) ?? 0m,
+            people,
+            pendingReviews,
+            subscriptionMembers,
+            activeSubscribers,
+            inactiveSubscribers);
     }
 
     public async Task<CrmPipelineBoard> GetPipelineBoardAsync(CancellationToken ct = default)
@@ -283,6 +325,23 @@ public partial class CrmService : ICrmService
         lead.CompanyId = RequireCompanyId();
         lead.CreatedDate = DateTime.UtcNow;
         if (string.IsNullOrWhiteSpace(lead.LeadStatus)) lead.LeadStatus = "New";
+
+        if (lead.PartyId is null)
+        {
+            var ensure = await _parties.EnsurePersonPartyAsync(new EnsurePartyRequest
+            {
+                CompanyId = lead.CompanyId.Value,
+                FirstName = lead.FirstName,
+                LastName = lead.LastName,
+                Phone = lead.Phone,
+                Mobile = lead.Mobile,
+                Email = lead.Email,
+                SecondaryEmail = lead.SecondaryEmail,
+                CreateReviewOnAmbiguous = true
+            }, ct);
+            lead.PartyId = ensure.PartyId;
+        }
+
         _db.Leads.Add(lead);
         await _db.SaveChangesAsync(ct);
         return lead;
@@ -329,6 +388,14 @@ public partial class CrmService : ICrmService
         lead.Territory = update.Territory;
         lead.CampaignId = update.CampaignId;
         lead.Tags = update.Tags;
+        if (update.PartyId is not null)
+        {
+            lead.PartyId = update.PartyId;
+        }
+        else if (lead.PartyId is int partyId)
+        {
+            await _parties.AttachContactChannelsAsync(partyId, lead.Phone, lead.Mobile, lead.Email, lead.SecondaryEmail, ct);
+        }
 
         await _db.SaveChangesAsync(ct);
         return lead;
@@ -414,6 +481,7 @@ public partial class CrmService : ICrmService
                 Industry = lead.Industry,
                 Territory = lead.Territory,
                 AccountId = account?.Id,
+                PartyId = lead.PartyId,
                 Stage = "Engaged",
                 CreatedDate = DateTime.UtcNow
             };
@@ -450,6 +518,7 @@ public partial class CrmService : ICrmService
                 Language = lead.Language,
                 ProspectId = prospect?.Id,
                 AccountId = account?.Id,
+                PartyId = lead.PartyId,
                 IsPrimary = true,
                 CreatedDate = DateTime.UtcNow
             };
@@ -479,6 +548,7 @@ public partial class CrmService : ICrmService
                 ContactId = contact?.Id,
                 CampaignId = lead.CampaignId,
                 Territory = lead.Territory,
+                PartyId = lead.PartyId,
                 CreatedDate = DateTime.UtcNow
             };
             opportunity.ExpectedRevenue = opportunity.Amount * (decimal)(opportunity.Probability!.Value / 100.0);
@@ -509,6 +579,20 @@ public partial class CrmService : ICrmService
         prospect.CompanyId = RequireCompanyId();
         prospect.CreatedDate = DateTime.UtcNow;
         if (string.IsNullOrWhiteSpace(prospect.Stage)) prospect.Stage = "Engaged";
+        if (prospect.PartyId is null)
+        {
+            var ensure = await _parties.EnsurePersonPartyAsync(new EnsurePartyRequest
+            {
+                CompanyId = prospect.CompanyId.Value,
+                FirstName = prospect.FirstName,
+                LastName = prospect.LastName,
+                Phone = prospect.PhoneNumber,
+                Mobile = prospect.PhoneNumber,
+                Email = prospect.Email,
+                CreateReviewOnAmbiguous = true
+            }, ct);
+            prospect.PartyId = ensure.PartyId;
+        }
         _db.Prospects.Add(prospect);
         await _db.SaveChangesAsync(ct);
         return prospect;
@@ -535,6 +619,9 @@ public partial class CrmService : ICrmService
         row.Description = update.Description;
         row.AccountId = update.AccountId;
         row.Tags = update.Tags;
+        row.PartyId = await EnsureAndAttachPartyAsync(
+            row.PartyId, update.PartyId, row.FirstName, row.LastName,
+            row.PhoneNumber, row.PhoneNumber, row.Email, null, ct);
         await _db.SaveChangesAsync(ct);
         return row;
     }
@@ -567,6 +654,21 @@ public partial class CrmService : ICrmService
         contact.Id = 0;
         contact.CompanyId = RequireCompanyId();
         contact.CreatedDate = DateTime.UtcNow;
+        if (contact.PartyId is null)
+        {
+            var ensure = await _parties.EnsurePersonPartyAsync(new EnsurePartyRequest
+            {
+                CompanyId = contact.CompanyId.Value,
+                FirstName = contact.FirstName,
+                LastName = contact.LastName,
+                Phone = contact.Phone,
+                Mobile = contact.Mobile,
+                Email = contact.Email,
+                SecondaryEmail = contact.SecondaryEmail,
+                CreateReviewOnAmbiguous = true
+            }, ct);
+            contact.PartyId = ensure.PartyId;
+        }
         _db.Contacts.Add(contact);
         await _db.SaveChangesAsync(ct);
         return contact;
@@ -619,6 +721,9 @@ public partial class CrmService : ICrmService
         row.Language = update.Language;
         row.IsPrimary = update.IsPrimary;
         row.Tags = update.Tags;
+        row.PartyId = await EnsureAndAttachPartyAsync(
+            row.PartyId, update.PartyId, row.FirstName, row.LastName,
+            row.Phone, row.Mobile, row.Email, row.SecondaryEmail, ct);
 
         await _db.SaveChangesAsync(ct);
         return row;
@@ -658,6 +763,7 @@ public partial class CrmService : ICrmService
         if (string.IsNullOrWhiteSpace(deal.Pipeline)) deal.Pipeline = "Standard";
         if (string.IsNullOrWhiteSpace(deal.ForecastCategory)) deal.ForecastCategory = "Pipeline";
         ApplyStageProbability(deal);
+        deal.PartyId ??= await ResolveRelatedPartyIdAsync(deal, ct);
         _db.Opportunities.Add(deal);
         await _db.SaveChangesAsync(ct);
         return deal;
@@ -700,6 +806,7 @@ public partial class CrmService : ICrmService
         row.CurrencyCode = update.CurrencyCode;
         row.Tags = update.Tags;
         ApplyStageProbability(row);
+        row.PartyId = update.PartyId ?? row.PartyId ?? await ResolveRelatedPartyIdAsync(row, ct);
 
         await _db.SaveChangesAsync(ct);
         return row;
@@ -759,6 +866,23 @@ public partial class CrmService : ICrmService
             account.AccountType = "Customer";
         }
 
+        var partyId = deal.PartyId;
+        if (partyId is null && deal.LeadId is int leadId)
+        {
+            var lead = await FindOwnedAsync(_db.Leads, leadId, ct);
+            partyId = lead?.PartyId;
+        }
+        if (partyId is null && deal.ProspectId is int prospectId)
+        {
+            var prospect = await FindOwnedAsync(_db.Prospects, prospectId, ct);
+            partyId = prospect?.PartyId;
+        }
+        if (partyId is null && deal.ContactId is int contactId)
+        {
+            var contact = await FindOwnedAsync(_db.Contacts, contactId, ct);
+            partyId = contact?.PartyId;
+        }
+
         var customer = new Customer
         {
             CompanyId = RequireCompanyId(),
@@ -769,8 +893,10 @@ public partial class CrmService : ICrmService
             Territory = deal.Territory,
             CustomerType = "Business",
             PaymentTerms = "Net 30",
+            PartyId = partyId,
             CreatedDate = DateTime.UtcNow
         };
+        deal.PartyId ??= partyId;
         _db.CrmCustomers.Add(customer);
         await _db.SaveChangesAsync(ct);
 
@@ -827,6 +953,25 @@ public partial class CrmService : ICrmService
         customer.Id = 0;
         customer.CompanyId = RequireCompanyId();
         customer.CreatedDate = DateTime.UtcNow;
+        // Customer remains the commercial bill-to master. PartyId is optional identity linkage only.
+        // Do not invent a new Party from company name alone — that is org territory (CrmAccount).
+        if (customer.PartyId is null &&
+            (!string.IsNullOrWhiteSpace(customer.Email) || !string.IsNullOrWhiteSpace(customer.PhoneNumber)))
+        {
+            var names = (customer.PrimaryContact ?? string.Empty).Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            var ensure = await _parties.EnsurePersonPartyAsync(new EnsurePartyRequest
+            {
+                CompanyId = customer.CompanyId.Value,
+                FirstName = names.Length > 0 ? names[0] : customer.PrimaryContact,
+                LastName = names.Length > 1 ? names[1] : null,
+                DisplayName = customer.PrimaryContact,
+                Phone = customer.PhoneNumber,
+                Mobile = customer.PhoneNumber,
+                Email = customer.Email,
+                CreateReviewOnAmbiguous = true
+            }, ct);
+            customer.PartyId = ensure.PartyId;
+        }
         _db.CrmCustomers.Add(customer);
         await _db.SaveChangesAsync(ct);
         return customer;
@@ -857,6 +1002,11 @@ public partial class CrmService : ICrmService
         row.AccountId = update.AccountId;
         row.Tags = update.Tags;
         row.Description = update.Description;
+        row.PartyId = await EnsureAndAttachPartyAsync(
+            row.PartyId, update.PartyId,
+            FirstNameFrom(row.PrimaryContact), LastNameFrom(row.PrimaryContact),
+            row.PhoneNumber, row.PhoneNumber, row.Email, null, ct,
+            displayName: row.PrimaryContact);
         await _db.SaveChangesAsync(ct);
         return row;
     }
@@ -988,6 +1138,87 @@ public partial class CrmService : ICrmService
         _db.Meetings.Remove(row);
         await _db.SaveChangesAsync(ct);
         return true;
+    }
+
+    private async Task<int?> EnsureAndAttachPartyAsync(
+        int? existingPartyId,
+        int? incomingPartyId,
+        string? firstName,
+        string? lastName,
+        string? phone,
+        string? mobile,
+        string? email,
+        string? secondaryEmail,
+        CancellationToken ct,
+        string? displayName = null)
+    {
+        if (incomingPartyId is not null)
+            return incomingPartyId;
+
+        if (existingPartyId is int partyId)
+        {
+            await _parties.AttachContactChannelsAsync(partyId, phone, mobile, email, secondaryEmail, ct);
+            return partyId;
+        }
+
+        if (string.IsNullOrWhiteSpace(phone)
+            && string.IsNullOrWhiteSpace(mobile)
+            && string.IsNullOrWhiteSpace(email))
+        {
+            return existingPartyId;
+        }
+
+        var ensure = await _parties.EnsurePersonPartyAsync(new EnsurePartyRequest
+        {
+            CompanyId = RequireCompanyId(),
+            FirstName = firstName,
+            LastName = lastName,
+            DisplayName = displayName,
+            Phone = phone,
+            Mobile = mobile,
+            Email = email,
+            SecondaryEmail = secondaryEmail,
+            CreateReviewOnAmbiguous = true
+        }, ct);
+        return ensure.PartyId;
+    }
+
+    private async Task<int?> ResolveRelatedPartyIdAsync(Opportunity deal, CancellationToken ct)
+    {
+        if (deal.PartyId is not null) return deal.PartyId;
+        if (deal.LeadId is int leadId)
+        {
+            var lead = await FindOwnedAsync(_db.Leads, leadId, ct);
+            if (lead?.PartyId is int id) return id;
+        }
+        if (deal.ProspectId is int prospectId)
+        {
+            var prospect = await FindOwnedAsync(_db.Prospects, prospectId, ct);
+            if (prospect?.PartyId is int id) return id;
+        }
+        if (deal.ContactId is int contactId)
+        {
+            var contact = await FindOwnedAsync(_db.Contacts, contactId, ct);
+            if (contact?.PartyId is int id) return id;
+        }
+        if (deal.CustomerId is int customerId)
+        {
+            var customer = await FindOwnedAsync(_db.CrmCustomers, customerId, ct);
+            if (customer?.PartyId is int id) return id;
+        }
+        return null;
+    }
+
+    private static string? FirstNameFrom(string? primaryContact)
+    {
+        var names = (primaryContact ?? string.Empty).Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        return names.Length > 0 ? names[0] : primaryContact;
+    }
+
+    private static string? LastNameFrom(string? primaryContact)
+    {
+        var names = (primaryContact ?? string.Empty).Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        return names.Length > 1 ? names[1] : null;
     }
 
     private void EnsureCrmAccess(string permission)

@@ -23,7 +23,7 @@ public sealed class LeadsCsvImporter : EntityCsvImporterBase
     [
         new() { Key = "Email", Header = "Email", Required = true, Example = "sample.lead1@example.com" },
         new() { Key = "FirstName", Header = "First Name", Required = true, Example = "SAMPLE" },
-        new() { Key = "LastName", Header = "Last Name", Required = true, Example = "Lead" },
+        new() { Key = "LastName", Header = "Last Name", Example = "Lead" },
         new() { Key = "CompanyName", Header = "Company", Example = "SAMPLE Lead Co" },
         new() { Key = "Phone", Header = "Phone", Example = "+91-9000000001" },
         new() { Key = "Mobile", Header = "Mobile", Example = "+91-9000000002" },
@@ -50,16 +50,16 @@ public sealed class LeadsCsvImporter : EntityCsvImporterBase
 
         var rows = new List<CsvRowValidation>();
         var n = 1;
+        var seenInFile = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var values in parsed.Rows)
         {
             n++;
             var errors = new List<string>();
+            var warnings = new List<string>();
             var email = CsvValidator.Get(values, "Email");
             var first = CsvValidator.Get(values, "FirstName");
-            var last = CsvValidator.Get(values, "LastName");
             if (!CsvValidator.TryRequired(email, "Email", out var e1)) errors.Add(e1!);
             if (!CsvValidator.TryRequired(first, "FirstName", out var e2)) errors.Add(e2!);
-            if (!CsvValidator.TryRequired(last, "LastName", out var e3)) errors.Add(e3!);
             if (!CsvValidator.TryEmail(email, out var e4) && e4 is not null) errors.Add(e4);
 
             int? id = null;
@@ -69,6 +69,16 @@ public sealed class LeadsCsvImporter : EntityCsvImporterBase
                 id = existingId;
                 action = "Update";
             }
+            else if (!string.IsNullOrWhiteSpace(email) && !seenInFile.Add(email))
+            {
+                action = "Skip";
+                warnings.Add("Duplicate email in this file; first occurrence will be imported.");
+                errors.Add("Duplicate email in import file.");
+            }
+            else if (!string.IsNullOrWhiteSpace(email))
+            {
+                seenInFile.Add(email);
+            }
 
             rows.Add(new CsvRowValidation
             {
@@ -77,6 +87,7 @@ public sealed class LeadsCsvImporter : EntityCsvImporterBase
                 Action = action,
                 Values = values,
                 Errors = errors,
+                Warnings = warnings,
                 MatchKey = email,
                 ExistingId = id
             });
@@ -92,6 +103,7 @@ public sealed class LeadsCsvImporter : EntityCsvImporterBase
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
         try
         {
+            var batch = 0;
             foreach (var row in preview.Rows.Where(r => r.IsValid))
             {
                 var map = Map(row.Values, companyId);
@@ -106,8 +118,15 @@ public sealed class LeadsCsvImporter : EntityCsvImporterBase
                     await _crm.CreateLeadAsync(map, ct);
                     created++;
                 }
+
+                batch++;
+                if (batch % 200 == 0)
+                {
+                    await _db.SaveChangesAsync(ct);
+                }
             }
 
+            await _db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
             return new CsvImportResult
             {
@@ -175,24 +194,30 @@ public sealed class LeadsCsvImporter : EntityCsvImporterBase
             ["Tags"] = "import"
         });
 
-    private static Lead Map(IReadOnlyDictionary<string, string> v, int companyId) => new()
+    private static Lead Map(IReadOnlyDictionary<string, string> v, int companyId)
     {
-        CompanyId = companyId,
-        Email = CsvValidator.Get(v, "Email"),
-        FirstName = CsvValidator.Get(v, "FirstName"),
-        LastName = CsvValidator.Get(v, "LastName"),
-        CompanyName = Null(CsvValidator.Get(v, "CompanyName")),
-        Phone = Null(CsvValidator.Get(v, "Phone")),
-        Mobile = Null(CsvValidator.Get(v, "Mobile")),
-        LeadSource = Null(CsvValidator.Get(v, "LeadSource")),
-        LeadStatus = Null(CsvValidator.Get(v, "LeadStatus")) ?? "New",
-        Industry = Null(CsvValidator.Get(v, "Industry")),
-        LeadOwner = Null(CsvValidator.Get(v, "LeadOwner")),
-        City = Null(CsvValidator.Get(v, "City")),
-        State = Null(CsvValidator.Get(v, "State")),
-        Country = Null(CsvValidator.Get(v, "Country")),
-        Tags = Null(CsvValidator.Get(v, "Tags"))
-    };
+        var last = Null(CsvValidator.Get(v, "LastName")) ?? "-";
+        var phone = Null(CsvValidator.Get(v, "Phone"));
+        var mobile = Null(CsvValidator.Get(v, "Mobile"));
+        return new Lead
+        {
+            CompanyId = companyId,
+            Email = CsvValidator.Get(v, "Email"),
+            FirstName = CsvValidator.Get(v, "FirstName"),
+            LastName = last,
+            CompanyName = Null(CsvValidator.Get(v, "CompanyName")),
+            Phone = phone ?? mobile,
+            Mobile = mobile,
+            LeadSource = Null(CsvValidator.Get(v, "LeadSource")),
+            LeadStatus = Null(CsvValidator.Get(v, "LeadStatus")) ?? "New",
+            Industry = Null(CsvValidator.Get(v, "Industry")),
+            LeadOwner = Null(CsvValidator.Get(v, "LeadOwner")),
+            City = Null(CsvValidator.Get(v, "City")),
+            State = Null(CsvValidator.Get(v, "State")),
+            Country = Null(CsvValidator.Get(v, "Country")),
+            Tags = Null(CsvValidator.Get(v, "Tags")) ?? "crm-import"
+        };
+    }
 
     private static string? Null(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim();
 }

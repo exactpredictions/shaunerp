@@ -56,7 +56,7 @@ public sealed partial class ProjectManagementService
             .ThenBy(t => t.DueDate ?? DateTime.MaxValue)
             .ThenByDescending(t => t.Priority)
             .Skip(Math.Max(0, filter.Skip))
-            .Take(Math.Clamp(filter.Take, 1, 500))
+            .Take(ListQuery.NormalizePageSize(filter.Take <= 0 ? 50 : filter.Take))
             .ToListAsync(ct);
 
         return new ProjectTaskPage(items, total);

@@ -1,0 +1,158 @@
+@page "/crm/people"
+@attribute [Authorize]
+@inject IPartyDirectoryService People
+
+<PageTitle>People — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM · Identity</p>
+            <h1>People</h1>
+            <p class="muted">Permanent person identities shared across Leads, Prospects, Contacts and Customers.</p>
+        </div>
+        <a class="btn" href="/crm/people/new">Add person</a>
+    </header>
+
+    <div class="grid-toolbar" style="flex-wrap:wrap;gap:0.75rem;margin-bottom:0.75rem">
+        <label class="grid-page-size">
+            <span>Filter</span>
+            <select value="@_roleFilter" @onchange="OnRoleFilterChanged" disabled="@_loading">
+                <option value="All">All people</option>
+                <option value="Lead">Lead linked</option>
+                <option value="Prospect">Prospect linked</option>
+                <option value="Contact">Contact linked</option>
+                <option value="Customer">Customer linked</option>
+                <option value="Opportunity">Opportunity linked</option>
+                <option value="Student">Student</option>
+                <option value="Subscriber">Subscriber</option>
+                <option value="ActiveSubscriber">Active subscriber</option>
+                <option value="InactiveSubscriber">Inactive / former subscriber</option>
+                <option value="StudentActiveSubscriber">Student + Active subscriber</option>
+                <option value="StudentInactiveSubscriber">Student + Inactive subscriber</option>
+                <option value="StudentNeverSubscriber">Student + never subscriber</option>
+                <option value="SubscriberNotStudent">Subscriber + not student</option>
+                <option value="ReportPurchaser">Report purchaser</option>
+                <option value="HoroscopePurchaser">Horoscope purchaser</option>
+                <option value="NumerologyPurchaser">Numerology purchaser</option>
+                <option value="BothReportTypes">Purchased both report types</option>
+                <option value="ReportPurchaserStudent">Report purchaser + student</option>
+                <option value="ReportPurchaserActiveSubscriber">Report purchaser + active subscriber</option>
+                <option value="ReportPurchaserInactiveSubscriber">Report purchaser + inactive subscriber</option>
+                <option value="ConsultationContact">Consultation contact (any)</option>
+                <option value="ConsultationProspect">Consultation prospect</option>
+                <option value="ConsultationClient">Consultation client</option>
+                <option value="EventParticipant">Event participant</option>
+                <option value="NoCrmRole">No CRM role</option>
+                <option value="Orphan">Unlinked / orphan</option>
+                <option value="Active">Active</option>
+                <option value="Inactive">Inactive</option>
+            </select>
+        </label>
+    </div>
+
+    <PagedListToolbar Query="_query" TotalCount="_total" Disabled="_loading"
+                      SearchPlaceholder="Search name, phone, email, or Party ID (P-000123)…"
+                      QueryChanged="OnQueryChangedAsync" />
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="muted">No people match the current search.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Party ID</th>
+                        <th>Name</th>
+                        <th>Phone</th>
+                        <th>Email</th>
+                        <th>Roles</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var x in _items)
+                    {
+                        <tr>
+                            <td><a href="@($"/crm/people/{x.PartyId}")">@x.PartyCode</a></td>
+                            <td>
+                                @x.DisplayName
+                                @if (x.IsOrphan)
+                                {
+                                    <span class="pill" title="No CRM links and no phone/email">Orphan</span>
+                                }
+                            </td>
+                            <td>@(x.PrimaryPhone ?? "—")</td>
+                            <td>@(x.PrimaryEmail ?? "—")</td>
+                            <td>@(x.Roles.Count == 0 ? "—" : string.Join(", ", x.Roles))</td>
+                            <td><span class="pill ok">@x.Status</span></td>
+                            <td>@x.CreatedDate.ToLocalTime().ToString("dd MMM yyyy")</td>
+                            <td><a href="@($"/crm/people/{x.PartyId}")">Open</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private PeopleListQuery _query = new();
+    private string _roleFilter = PeopleRoleFilters.All;
+    private int _total;
+    private List<PersonListItemDto> _items = new();
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task OnQueryChangedAsync(ListQuery query)
+    {
+        _query = new PeopleListQuery
+        {
+            Search = query.Search,
+            Page = query.NormalizedPage,
+            PageSize = query.NormalizedPageSize,
+            RoleFilter = _roleFilter
+        };
+        await ReloadAsync();
+    }
+
+    private async Task OnRoleFilterChanged(ChangeEventArgs e)
+    {
+        _roleFilter = e.Value?.ToString() ?? PeopleRoleFilters.All;
+        _query = _query.WithRoleFilter(_roleFilter);
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _query.RoleFilter = _roleFilter;
+            var page = await People.QueryPeopleAsync(_query);
+            _items = page.Items.ToList();
+            _total = page.TotalCount;
+            _query = new PeopleListQuery
+            {
+                Search = _query.Search,
+                Page = page.Page,
+                PageSize = page.PageSize,
+                RoleFilter = _roleFilter
+            };
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

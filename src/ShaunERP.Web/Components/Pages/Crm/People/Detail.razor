@@ -1,0 +1,519 @@
+@page "/crm/people/{Id:int}"
+@attribute [Authorize]
+@inject IPartyDirectoryService People
+@inject ICrmService Crm
+@inject NavigationManager Nav
+
+<PageTitle>@(_person?.DisplayName ?? "Person") — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM · Identity</p>
+            <h1>@(_person?.DisplayName ?? "Person")</h1>
+            @if (_person is not null)
+            {
+                <p class="muted">Party ID: @_person.PartyCode</p>
+                @if (_person.DerivedRoles.Count > 0)
+                {
+                    <p class="muted" style="margin-top:0.35rem">Roles: @string.Join(", ", _person.DerivedRoles)</p>
+                }
+            }
+        </div>
+        <a class="btn ghost" href="/crm/people">Back to People</a>
+    </header>
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_missing || _person is null)
+    {
+        <p class="alert">Person not found.</p>
+    }
+    else
+    {
+        @if (!string.IsNullOrEmpty(_error)) { <div class="alert">@_error</div> }
+        @if (!string.IsNullOrEmpty(_ok)) { <div class="ok-msg">@_ok</div> }
+
+        @if (_person.IsOrphan)
+        {
+            <p class="alert">This identity has no CRM links and no phone/email (possible orphan from an interrupted migration).</p>
+        }
+
+        <div class="form-card form-wide">
+            <h2 class="form-section">Identity</h2>
+            <EditForm Model="_edit" OnValidSubmit="SaveIdentityAsync" class="form-grid">
+                <label>First name <InputText @bind-Value="_edit.FirstName" /></label>
+                <label>Last name <InputText @bind-Value="_edit.LastName" /></label>
+                <label>Primary phone <InputText @bind-Value="_edit.PrimaryPhone" /></label>
+                <label>Primary email <InputText @bind-Value="_edit.PrimaryEmail" /></label>
+                <label>Status
+                    <InputSelect @bind-Value="_edit.Status">
+                        <option>Active</option>
+                        <option>Inactive</option>
+                    </InputSelect>
+                </label>
+                <label class="check">
+                    <InputCheckbox @bind-Value="_edit.SyncLinkedCrmFields" />
+                    Sync name / phone / email to linked Leads, Prospects, Contacts &amp; Customers
+                </label>
+                <div class="form-actions" style="grid-column:1/-1">
+                    <button class="btn" type="submit" disabled="@_saving">Save identity</button>
+                </div>
+            </EditForm>
+
+            @if (_person.Phones.Count > 0 || _person.Emails.Count > 0)
+            {
+                <h2 class="form-section">All phones &amp; emails</h2>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Type</th><th>Value</th><th>Normalized</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var ph in _person.Phones)
+                            {
+                                <tr>
+                                    <td>Phone · @ph.PhoneType</td>
+                                    <td>@(ph.OriginalPhone ?? "—")</td>
+                                    <td>@(ph.NormalizedPhone ?? "—") @(ph.IsPrimary ? "(primary)" : "")</td>
+                                    <td>@(ph.IsActive ? "Active" : "Inactive")</td>
+                                </tr>
+                            }
+                            @foreach (var em in _person.Emails)
+                            {
+                                <tr>
+                                    <td>Email · @em.EmailType</td>
+                                    <td>@(em.OriginalEmail ?? "—")</td>
+                                    <td>@(em.NormalizedEmail ?? "—") @(em.IsPrimary ? "(primary)" : "")</td>
+                                    <td>@(em.IsActive ? "Active" : "Inactive")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+
+        <div class="form-card form-wide" style="margin-top:1rem">
+            <h2 class="form-section">CRM relationships</h2>
+            @if (_person.LinkedRecords.Count == 0)
+            {
+                <p class="muted">No Lead, Prospect, Contact, Opportunity or Customer is linked yet.</p>
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Role</th><th>Record</th><th>Status</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var r in _person.LinkedRecords)
+                            {
+                                <tr>
+                                    <td>@r.Role</td>
+                                    <td>@r.Role.ToUpperInvariant()-@r.Id.ToString("D5") · @(string.IsNullOrWhiteSpace(r.Label) ? "—" : r.Label)</td>
+                                    <td>@(r.Status ?? "—")</td>
+                                    <td><a href="@r.Href">Open</a></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+
+            <h2 class="form-section">Actions</h2>
+            <div class="form-actions" style="flex-wrap:wrap">
+                <button class="btn" type="button" @onclick="CreateLeadAsync" disabled="@_saving">Create Lead</button>
+                <button class="btn ghost" type="button" @onclick="CreateContactAsync" disabled="@_saving">Create Contact</button>
+                <button class="btn ghost" type="button" @onclick="CreateCustomerAsync" disabled="@_saving">Create Customer</button>
+                @if (_person.LinkedRecords.FirstOrDefault(r => r.Role == "Lead") is { } lead)
+                {
+                    <a class="btn ghost" href="@lead.Href">Open Lead</a>
+                }
+                @if (_person.LinkedRecords.FirstOrDefault(r => r.Role == "Customer") is { } cust)
+                {
+                    <a class="btn ghost" href="@cust.Href">Open Customer</a>
+                }
+            </div>
+        </div>
+
+        <div class="form-card form-wide" style="margin-top:1rem">
+            <h2 class="form-section">Courses / Training</h2>
+            @if (_person.Courses.Count == 0)
+            {
+                <p class="muted">No course enrollments.</p>
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Course</th><th>Status</th><th>Source</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var c in _person.Courses)
+                            {
+                                <tr>
+                                    <td>@c.ProgramName</td>
+                                    <td>@c.EnrollmentStatus</td>
+                                    <td>@(c.Source ?? "—")</td>
+                                    <td><a href="@($"/crm/courses/{c.ProgramId}")">Open course</a></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+
+            <h2 class="form-section">Subscriptions</h2>
+            @if (_person.Subscriptions.Count == 0)
+            {
+                <p class="muted">No subscription memberships.</p>
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Plan</th><th>Status</th><th>Proven dates</th><th>Legacy date</th><th>Source</th></tr></thead>
+                        <tbody>
+                            @foreach (var s in _person.Subscriptions)
+                            {
+                                <tr>
+                                    <td>
+                                        @s.PlanName
+                                        @if (!string.IsNullOrWhiteSpace(s.LegacyUserId))
+                                        {
+                                            <div class="muted">Legacy user #@s.LegacyUserId</div>
+                                        }
+                                    </td>
+                                    <td>
+                                        @if (s.MembershipStatus == "Active")
+                                        {
+                                            <span class="pill ok">Active</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="pill">@(s.MembershipStatus == "Expired" ? "Inactive / Expired" : s.MembershipStatus)</span>
+                                        }
+                                    </td>
+                                    <td>
+                                        @if (s.StartDate is not null)
+                                        {
+                                            <div>Known activation: @s.StartDate.Value.ToLocalTime().ToString("dd MMM yyyy")</div>
+                                        }
+                                        @if (s.EndDate is not null)
+                                        {
+                                            <div>Known deactivation: @s.EndDate.Value.ToLocalTime().ToString("dd MMM yyyy")</div>
+                                        }
+                                        @if (s.StartDate is null && s.EndDate is null)
+                                        {
+                                            <span class="muted">—</span>
+                                        }
+                                    </td>
+                                    <td>
+                                        @if (s.LegacyDate is not null)
+                                        {
+                                            var isReg = s.LegacyDateSource?.Contains("registration", StringComparison.OrdinalIgnoreCase) == true;
+                                            <div>@(isReg ? "Legacy registration" : "Legacy date"): @s.LegacyDate.Value.ToLocalTime().ToString("dd MMM yyyy")</div>
+                                            <div class="muted">@(s.LegacyDateSource ?? "")</div>
+                                        }
+                                        else
+                                        {
+                                            <span>—</span>
+                                        }
+                                    </td>
+                                    <td>@(s.Source ?? "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+
+            <h2 class="form-section">Report Purchases</h2>
+            @if (_person.ReportPurchases.Count == 0)
+            {
+                <p class="muted">No report purchases.</p>
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Report</th><th>Amount</th><th>Payment date</th><th>Status</th><th>Subject</th><th>Source</th></tr></thead>
+                        <tbody>
+                            @foreach (var r in _person.ReportPurchases)
+                            {
+                                <tr>
+                                    <td>@r.ReportProductName</td>
+                                    <td>
+                                        @if (r.AmountPaid is not null)
+                                        {
+                                            var cur = string.IsNullOrWhiteSpace(r.Currency) || r.Currency == "INR" ? "₹" : r.Currency + " ";
+                                            <span>@cur@r.AmountPaid.Value.ToString("0.##")</span>
+                                        }
+                                        else
+                                        {
+                                            <span>—</span>
+                                        }
+                                    </td>
+                                    <td>@(r.PaymentDate?.ToLocalTime().ToString("dd MMM yyyy") ?? "—")</td>
+                                    <td>@(r.ReportStatus ?? "—")</td>
+                                    <td>@(r.SubjectName ?? "—")</td>
+                                    <td>@(r.SourceId ?? "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+
+            <h2 class="form-section">Consultations</h2>
+            @if (_person.Consultations.Count == 0)
+            {
+                <p class="muted">No consultation history.</p>
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Service</th><th>Status</th><th>Relevant date</th><th>Source</th></tr></thead>
+                        <tbody>
+                            @foreach (var c in _person.Consultations)
+                            {
+                                <tr>
+                                    <td>@(c.ServiceName ?? "—")</td>
+                                    <td>
+                                        @if (c.EngagementStatus is "Unclassified" or "Historical")
+                                        {
+                                            <span class="pill">Historical / Unclassified</span>
+                                        }
+                                        else if (c.EngagementStatus == "Completed")
+                                        {
+                                            <span class="pill ok">Completed</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="pill">@c.EngagementStatus</span>
+                                        }
+                                    </td>
+                                    <td>
+                                        @{
+                                            var d = c.ConsultationDate ?? c.ScheduledDate ?? c.EnquiryDate ?? c.SourceCreatedAt;
+                                        }
+                                        @(d?.ToLocalTime().ToString("dd MMM yyyy") ?? "—")
+                                    </td>
+                                    <td>@(c.Source ?? "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+
+            <h2 class="form-section">Events</h2>
+            @if (_person.Events.Count == 0)
+            {
+                <p class="muted">No event participation.</p>
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Event</th><th>Registration</th><th>Attendance</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var e in _person.Events)
+                            {
+                                <tr>
+                                    <td>@e.EventName</td>
+                                    <td>@e.RegistrationStatus</td>
+                                    <td>@(e.AttendanceStatus ?? "—")</td>
+                                    <td><a href="@($"/crm/events/{e.EventId}")">Open event</a></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+
+        <div class="form-card form-wide" style="margin-top:1rem">
+            <h2 class="form-section">Activity timeline</h2>
+            @if (_person.Timeline.Count == 0)
+            {
+                <p class="muted">No notes, calls, tasks or meetings found on linked CRM records.</p>
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>When</th><th>Type</th><th>Title</th><th>Related</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var a in _person.Timeline)
+                            {
+                                <tr>
+                                    <td>@(a.OccurredAt?.ToLocalTime().ToString("dd MMM yyyy HH:mm") ?? "—")</td>
+                                    <td>@a.ActivityType</td>
+                                    <td>@a.Title</td>
+                                    <td>@(a.RelatedRole ?? "—")</td>
+                                    <td>@if (!string.IsNullOrWhiteSpace(a.Href)) { <a href="@a.Href">Open</a> }</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool _loading = true;
+    private bool _missing;
+    private bool _saving;
+    private string? _error;
+    private string? _ok;
+    private PersonDetailDto? _person;
+    private UpdatePersonIdentityRequest _edit = new();
+
+    protected override async Task OnParametersSetAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _error = null;
+        _ok = null;
+        _missing = false;
+        try
+        {
+            _person = await People.GetPersonAsync(Id);
+            if (_person is null)
+            {
+                _missing = true;
+                return;
+            }
+
+            _edit = new UpdatePersonIdentityRequest
+            {
+                FirstName = _person.FirstName,
+                LastName = _person.LastName,
+                PrimaryPhone = _person.Phones.FirstOrDefault(p => p.IsPrimary)?.OriginalPhone
+                               ?? _person.Phones.FirstOrDefault()?.OriginalPhone
+                               ?? _person.Phones.FirstOrDefault()?.NormalizedPhone,
+                PrimaryEmail = _person.Emails.FirstOrDefault(e => e.IsPrimary)?.OriginalEmail
+                               ?? _person.Emails.FirstOrDefault()?.NormalizedEmail,
+                Status = _person.Status,
+                SyncLinkedCrmFields = true
+            };
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SaveIdentityAsync()
+    {
+        _error = null;
+        _ok = null;
+        _saving = true;
+        try
+        {
+            _person = await People.UpdatePersonIdentityAsync(Id, _edit);
+            _ok = _edit.SyncLinkedCrmFields
+                ? "Identity saved and synced to linked CRM records."
+                : "Identity saved (CRM stage copies not updated).";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task CreateLeadAsync()
+    {
+        if (_person is null) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            var lead = await Crm.CreateLeadAsync(new Lead
+            {
+                PartyId = _person.PartyId,
+                FirstName = _person.FirstName ?? _person.DisplayName,
+                LastName = _person.LastName ?? "",
+                Mobile = _edit.PrimaryPhone,
+                Phone = _edit.PrimaryPhone,
+                Email = _edit.PrimaryEmail,
+                LeadStatus = "New"
+            });
+            Nav.NavigateTo($"/crm/leads/{lead.Id}");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task CreateContactAsync()
+    {
+        if (_person is null) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            var contact = await Crm.CreateContactAsync(new Contact
+            {
+                PartyId = _person.PartyId,
+                FirstName = _person.FirstName ?? _person.DisplayName,
+                LastName = _person.LastName ?? "",
+                Mobile = _edit.PrimaryPhone,
+                Phone = _edit.PrimaryPhone,
+                Email = _edit.PrimaryEmail
+            });
+            Nav.NavigateTo($"/crm/contacts/{contact.Id}");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task CreateCustomerAsync()
+    {
+        if (_person is null) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            var customer = await Crm.CreateCustomerAsync(new Customer
+            {
+                PartyId = _person.PartyId,
+                CompanyName = _person.DisplayName,
+                PrimaryContact = _person.DisplayName,
+                PhoneNumber = _edit.PrimaryPhone,
+                Email = _edit.PrimaryEmail,
+                CustomerType = "Individual"
+            });
+            Nav.NavigateTo($"/crm/customers/{customer.Id}");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

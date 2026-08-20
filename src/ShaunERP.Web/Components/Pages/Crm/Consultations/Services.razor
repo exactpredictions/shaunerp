@@ -1,0 +1,68 @@
+@page "/crm/consultation-services"
+@attribute [Authorize]
+@inject IRelationshipService Relationships
+
+<PageTitle>Consultation Services — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM · Relationships</p>
+            <h1>Consultation Services</h1>
+            <p class="muted">Consultation service catalog and engagement counts.</p>
+        </div>
+    </header>
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="muted">No consultation services found.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Status</th>
+                        <th>Engagements</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var x in _items)
+                    {
+                        <tr>
+                            <td>@x.Name</td>
+                            <td><span class="pill ok">@x.Status</span></td>
+                            <td>@x.EngagementCount</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private List<ConsultationServiceDto> _items = new();
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _items = (await Relationships.ListConsultationServicesAsync()).ToList();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

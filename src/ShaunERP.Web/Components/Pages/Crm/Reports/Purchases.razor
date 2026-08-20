@@ -1,0 +1,260 @@
+@page "/crm/report-purchases"
+@attribute [Authorize]
+@inject IRelationshipService Relationships
+@inject NavigationManager Nav
+
+<PageTitle>Report Purchases — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM · Relationships</p>
+            <h1>Report Purchases</h1>
+            <p class="muted">Individual Horoscope and Numerology report purchases linked through Party identity.</p>
+        </div>
+    </header>
+
+    @if (_summary is not null)
+    {
+        <div class="stat-grid crm-stats" style="margin-bottom:1rem">
+            <button type="button" class="stat-card" style="cursor:pointer;border:none;text-align:left" @onclick='() => SetTypeAsync("All")'>
+                <strong>@_summary.TotalPurchases</strong><span>All purchases</span>
+            </button>
+            <button type="button" class="stat-card" style="cursor:pointer;border:none;text-align:left" @onclick='() => SetTypeAsync("Horoscope")'>
+                <strong>@_summary.HoroscopePurchases</strong><span>Horoscope</span>
+            </button>
+            <button type="button" class="stat-card" style="cursor:pointer;border:none;text-align:left" @onclick='() => SetTypeAsync("Numerology")'>
+                <strong>@_summary.NumerologyPurchases</strong><span>Numerology</span>
+            </button>
+            <div class="stat-card">
+                <strong>@_summary.UniquePurchasers</strong><span>Unique purchasers</span>
+            </div>
+        </div>
+    }
+
+    <div class="grid-toolbar" style="flex-wrap:wrap;gap:0.75rem;margin-bottom:0.75rem">
+        <label class="grid-page-size">
+            <span>Report type</span>
+            <select value="@_typeFilter" @onchange="OnTypeFilterChanged" disabled="@_loading">
+                <option value="All">All</option>
+                <option value="Horoscope">Horoscope Report</option>
+                <option value="Numerology">Numerology Report</option>
+            </select>
+        </label>
+        <label class="grid-page-size">
+            <span>Report status</span>
+            <select value="@_reportStatus" @onchange="OnReportStatusChanged" disabled="@_loading">
+                <option value="All">All</option>
+                <option value="Generated">Generated</option>
+                <option value="Pending">Pending</option>
+                <option value="Failed">Failed</option>
+            </select>
+        </label>
+        <label class="grid-page-size">
+            <span>Delivery</span>
+            <select value="@_deliveryStatus" @onchange="OnDeliveryChanged" disabled="@_loading">
+                <option value="All">All</option>
+                <option value="Sent">Sent</option>
+                <option value="Pending">Pending</option>
+                <option value="Failed">Failed</option>
+            </select>
+        </label>
+        <label class="grid-page-size">
+            <span>Student</span>
+            <select value="@_studentFilter" @onchange="OnStudentChanged" disabled="@_loading">
+                <option value="">All</option>
+                <option value="yes">Also student</option>
+                <option value="no">Not student</option>
+            </select>
+        </label>
+        <label class="grid-page-size">
+            <span>Subscriber</span>
+            <select value="@_subscriberFilter" @onchange="OnSubscriberChanged" disabled="@_loading">
+                <option value="All">All</option>
+                <option value="Active">Active subscriber</option>
+                <option value="Inactive">Inactive subscriber</option>
+                <option value="Any">Any subscriber</option>
+                <option value="None">Never subscriber</option>
+            </select>
+        </label>
+    </div>
+
+    <PagedListToolbar Query="_query" TotalCount="_total" Disabled="_loading"
+                      SearchPlaceholder="Search name, phone, email, Party ID, or source ID…"
+                      QueryChanged="OnQueryChangedAsync" />
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="muted">No report purchases match the current filters.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Purchase ID</th>
+                        <th>Party ID</th>
+                        <th>Name</th>
+                        <th>Phone</th>
+                        <th>Email</th>
+                        <th>Report type</th>
+                        <th>Amount</th>
+                        <th>Payment date</th>
+                        <th>Report status</th>
+                        <th>Delivery</th>
+                        <th>Source</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var x in _items)
+                    {
+                        <tr>
+                            <td>@x.Id</td>
+                            <td><a href="@($"/crm/people/{x.PartyId}")">@x.PartyCode</a></td>
+                            <td>@x.DisplayName</td>
+                            <td>@(x.Phone ?? "—")</td>
+                            <td>@(x.Email ?? "—")</td>
+                            <td>@x.ReportProductName</td>
+                            <td>@FormatAmount(x)</td>
+                            <td>@(x.PaymentDate?.ToLocalTime().ToString("dd MMM yyyy") ?? "—")</td>
+                            <td>@(x.ReportStatus ?? "—")</td>
+                            <td>@FormatDelivery(x)</td>
+                            <td>
+                                <div>@(x.SourceId ?? "—")</div>
+                                <div class="muted">@(x.SourceFile ?? "")</div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    [SupplyParameterFromQuery(Name = "type")]
+    public string? TypeFromQuery { get; set; }
+
+    private bool _loading = true;
+    private ReportPurchaseListQuery _query = new();
+    private string _typeFilter = "All";
+    private string _reportStatus = "All";
+    private string _deliveryStatus = "All";
+    private string _studentFilter = string.Empty;
+    private string _subscriberFilter = "All";
+    private int _total;
+    private List<ReportPurchaseListItemDto> _items = new();
+    private ReportPurchaseSummaryDto? _summary;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(TypeFromQuery))
+            _typeFilter = TypeFromQuery.Trim();
+        _summary = await Relationships.GetReportPurchaseSummaryAsync();
+        await ReloadAsync();
+    }
+
+    private async Task OnQueryChangedAsync(ListQuery query)
+    {
+        _query = new ReportPurchaseListQuery
+        {
+            Search = query.Search,
+            Page = query.Page,
+            PageSize = query.PageSize,
+            ReportType = _query.ReportType,
+            ReportStatus = _query.ReportStatus,
+            DeliveryStatus = _query.DeliveryStatus,
+            IsStudent = _query.IsStudent,
+            SubscriberFilter = _query.SubscriberFilter
+        };
+        await ReloadAsync();
+    }
+
+    private async Task SetTypeAsync(string type)
+    {
+        _typeFilter = type;
+        await ReloadAsync();
+    }
+
+    private async Task OnTypeFilterChanged(ChangeEventArgs e)
+    {
+        _typeFilter = e.Value?.ToString() ?? "All";
+        await ReloadAsync();
+    }
+
+    private async Task OnReportStatusChanged(ChangeEventArgs e)
+    {
+        _reportStatus = e.Value?.ToString() ?? "All";
+        await ReloadAsync();
+    }
+
+    private async Task OnDeliveryChanged(ChangeEventArgs e)
+    {
+        _deliveryStatus = e.Value?.ToString() ?? "All";
+        await ReloadAsync();
+    }
+
+    private async Task OnStudentChanged(ChangeEventArgs e)
+    {
+        _studentFilter = e.Value?.ToString() ?? string.Empty;
+        await ReloadAsync();
+    }
+
+    private async Task OnSubscriberChanged(ChangeEventArgs e)
+    {
+        _subscriberFilter = e.Value?.ToString() ?? "All";
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _query = new ReportPurchaseListQuery
+            {
+                Search = _query.Search,
+                Page = _query.NormalizedPage,
+                PageSize = _query.NormalizedPageSize,
+                ReportType = _typeFilter,
+                ReportStatus = _reportStatus,
+                DeliveryStatus = _deliveryStatus,
+                SubscriberFilter = _subscriberFilter,
+                IsStudent = _studentFilter switch
+                {
+                    "yes" => true,
+                    "no" => false,
+                    _ => null
+                }
+            };
+            var page = await Relationships.QueryReportPurchasesAsync(_query);
+            _items = page.Items.ToList();
+            _total = page.TotalCount;
+            _query.Page = page.Page;
+            _query.PageSize = page.PageSize;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string FormatAmount(ReportPurchaseListItemDto x)
+    {
+        if (x.AmountPaid is null) return "—";
+        var cur = string.IsNullOrWhiteSpace(x.Currency) || x.Currency == "INR" ? "₹" : x.Currency + " ";
+        return $"{cur}{x.AmountPaid:0.##}";
+    }
+
+    private static string FormatDelivery(ReportPurchaseListItemDto x)
+    {
+        var email = x.DeliveryEmailStatus ?? "—";
+        var wa = x.DeliveryWhatsappStatus ?? "—";
+        return $"Email: {email} · WA: {wa}";
+    }
+}

@@ -1,0 +1,250 @@
+@page "/crm/subscription-members"
+@attribute [Authorize]
+@inject IRelationshipService Relationships
+
+<PageTitle>Subscription Members — ShaunERP</PageTitle>
+
+<section class="page">
+    <header class="page-head">
+        <div>
+            <p class="eyebrow">CRM · Relationships</p>
+            <h1>Subscription Members</h1>
+            <p class="muted">ExactPredictions premium members linked through Party identity.</p>
+        </div>
+    </header>
+
+    @if (_summary is not null)
+    {
+        <div class="stat-grid crm-stats" style="margin-bottom:1rem">
+            <button type="button" class="stat-card" style="cursor:pointer;border:none;text-align:left" @onclick='() => SetStatusAsync("All")'>
+                <strong>@_summary.TotalMembers</strong><span>Total historical</span>
+            </button>
+            <button type="button" class="stat-card" style="cursor:pointer;border:none;text-align:left" @onclick='() => SetStatusAsync("Active")'>
+                <strong>@_summary.ActiveMembers</strong><span>Active</span>
+            </button>
+            <button type="button" class="stat-card" style="cursor:pointer;border:none;text-align:left" @onclick='() => SetStatusAsync("Inactive")'>
+                <strong>@_summary.InactiveMembers</strong><span>Inactive / former</span>
+            </button>
+        </div>
+    }
+
+    <div class="grid-toolbar" style="flex-wrap:wrap;gap:0.75rem;margin-bottom:0.75rem">
+        <label class="grid-page-size">
+            <span>Status</span>
+            <select value="@_statusFilter" @onchange="OnStatusFilterChanged" disabled="@_loading">
+                <option value="All">All</option>
+                <option value="@MembershipStatuses.Active">Active</option>
+                <option value="Inactive">Inactive / Former</option>
+                <option value="@MembershipStatuses.Expired">Expired</option>
+            </select>
+        </label>
+        <label class="grid-page-size">
+            <span>Plan</span>
+            <select value="@_planFilter" @onchange="OnPlanFilterChanged" disabled="@_loading">
+                <option value="">All plans</option>
+                @foreach (var p in _plans)
+                {
+                    <option value="@p.Id">@p.Name</option>
+                }
+            </select>
+        </label>
+        <label class="grid-page-size">
+            <span>Course</span>
+            <select value="@_programFilter" @onchange="OnProgramFilterChanged" disabled="@_loading">
+                <option value="">Any course</option>
+                @foreach (var p in _programs)
+                {
+                    <option value="@p.Id">@p.Name</option>
+                }
+            </select>
+        </label>
+        <label class="grid-page-size">
+            <span>Student</span>
+            <select value="@_studentFilter" @onchange="OnStudentFilterChanged" disabled="@_loading">
+                <option value="">All</option>
+                <option value="yes">Also student</option>
+                <option value="no">Not student</option>
+            </select>
+        </label>
+    </div>
+
+    <PagedListToolbar Query="_query" TotalCount="_total" Disabled="_loading"
+                      SearchPlaceholder="Search name, phone, email, Party ID, or legacy user ID…"
+                      QueryChanged="OnQueryChangedAsync" />
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="muted">No members match the current filters.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Party ID</th>
+                        <th>Name</th>
+                        <th>Phone</th>
+                        <th>Email</th>
+                        <th>Plan</th>
+                        <th>Status</th>
+                        <th>Relevant date</th>
+                        <th>Legacy ID</th>
+                        <th>Source</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var x in _items)
+                    {
+                        <tr>
+                            <td><a href="@($"/crm/people/{x.PartyId}")">@x.PartyCode</a></td>
+                            <td>@x.DisplayName</td>
+                            <td>@(x.Phone ?? "—")</td>
+                            <td>@(x.Email ?? "—")</td>
+                            <td>@x.PlanName</td>
+                            <td>
+                                @if (x.MembershipStatus == MembershipStatuses.Active)
+                                {
+                                    <span class="pill ok">Active</span>
+                                }
+                                else
+                                {
+                                    <span class="pill">@DisplayStatus(x.MembershipStatus)</span>
+                                }
+                            </td>
+                            <td>@FormatRelevantDate(x)</td>
+                            <td>@(x.LegacyUserId ?? "—")</td>
+                            <td>@(x.Source ?? "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private MembershipListQuery _query = new();
+    private string _planFilter = string.Empty;
+    private string _statusFilter = "All";
+    private string _programFilter = string.Empty;
+    private string _studentFilter = string.Empty;
+    private int _total;
+    private List<MembershipListItemDto> _items = new();
+    private List<SubscriptionPlanDto> _plans = new();
+    private List<ProgramListItemDto> _programs = new();
+    private SubscriptionSummaryDto? _summary;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _plans = (await Relationships.ListPlansAsync()).ToList();
+        _programs = (await Relationships.QueryProgramsAsync(new ListQuery { Page = 1, PageSize = 500 })).Items.ToList();
+        _summary = await Relationships.GetSubscriptionSummaryAsync();
+        await ReloadAsync();
+    }
+
+    private async Task OnQueryChangedAsync(ListQuery query)
+    {
+        _query = new MembershipListQuery
+        {
+            Search = query.Search,
+            Page = query.Page,
+            PageSize = query.PageSize,
+            PlanId = _query.PlanId,
+            MembershipStatus = _query.MembershipStatus,
+            ProgramId = _query.ProgramId,
+            IsStudent = _query.IsStudent
+        };
+        await ReloadAsync();
+    }
+
+    private async Task SetStatusAsync(string status)
+    {
+        _statusFilter = status;
+        await ReloadAsync();
+    }
+
+    private async Task OnPlanFilterChanged(ChangeEventArgs e)
+    {
+        _planFilter = e.Value?.ToString() ?? string.Empty;
+        await ReloadAsync();
+    }
+
+    private async Task OnStatusFilterChanged(ChangeEventArgs e)
+    {
+        _statusFilter = e.Value?.ToString() ?? "All";
+        await ReloadAsync();
+    }
+
+    private async Task OnProgramFilterChanged(ChangeEventArgs e)
+    {
+        _programFilter = e.Value?.ToString() ?? string.Empty;
+        await ReloadAsync();
+    }
+
+    private async Task OnStudentFilterChanged(ChangeEventArgs e)
+    {
+        _studentFilter = e.Value?.ToString() ?? string.Empty;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _query = new MembershipListQuery
+            {
+                Search = _query.Search,
+                Page = _query.NormalizedPage,
+                PageSize = _query.NormalizedPageSize,
+                PlanId = ParseId(_planFilter),
+                MembershipStatus = _statusFilter,
+                ProgramId = ParseId(_programFilter),
+                IsStudent = _studentFilter switch
+                {
+                    "yes" => true,
+                    "no" => false,
+                    _ => null
+                }
+            };
+            var page = await Relationships.QueryMembershipsAsync(_query);
+            _items = page.Items.ToList();
+            _total = page.TotalCount;
+            _query.Page = page.Page;
+            _query.PageSize = page.PageSize;
+            _summary = await Relationships.GetSubscriptionSummaryAsync();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static int? ParseId(string value)
+        => int.TryParse(value, out var id) && id > 0 ? id : null;
+
+    private static string DisplayStatus(string status)
+        => status == MembershipStatuses.Expired ? "Inactive / Expired" : status;
+
+    private static string FormatRelevantDate(MembershipListItemDto x)
+    {
+        if (x.StartDate is DateTime start)
+            return $"Activated {start.ToLocalTime():dd MMM yyyy}";
+        if (x.EndDate is DateTime end)
+            return $"Deactivated {end.ToLocalTime():dd MMM yyyy}";
+        if (x.LegacyDate is DateTime legacy)
+        {
+            var label = x.LegacyDateSource?.Contains("registration", StringComparison.OrdinalIgnoreCase) == true
+                ? "Legacy registration"
+                : "Legacy date";
+            return $"{label} {legacy.ToLocalTime():dd MMM yyyy}";
+        }
+        return "—";
+    }
+}

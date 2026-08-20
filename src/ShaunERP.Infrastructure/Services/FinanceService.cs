@@ -21,6 +21,7 @@ public interface IFinanceService
     Task<IReadOnlyList<CrmProduct>> ListProductsAsync(CancellationToken ct = default);
 
     Task<IReadOnlyList<Invoice>> ListInvoicesAsync(CancellationToken ct = default);
+    Task<PagedResult<Invoice>> QueryInvoicesAsync(ListQuery? query = null, CancellationToken ct = default);
     Task<Invoice?> GetInvoiceAsync(int id, CancellationToken ct = default);
     Task<Invoice> CreateInvoiceAsync(Invoice invoice, CancellationToken ct = default);
     Task<Invoice?> UpdateInvoiceAsync(int id, Invoice update, CancellationToken ct = default);
@@ -30,6 +31,7 @@ public interface IFinanceService
     Task<Invoice?> MarkPaidAsync(int id, CancellationToken ct = default);
 
     Task<IReadOnlyList<InvoicePayment>> ListPaymentsAsync(CancellationToken ct = default);
+    Task<PagedResult<InvoicePayment>> QueryPaymentsAsync(ListQuery? query = null, CancellationToken ct = default);
     Task<(bool Ok, string? Error, InvoicePayment? Payment)> RecordPaymentAsync(
         int invoiceId, InvoicePayment payment, CancellationToken ct = default);
     Task<bool> DeletePaymentAsync(int paymentId, CancellationToken ct = default);
@@ -200,6 +202,27 @@ public class FinanceService : IFinanceService
             .OrderByDescending(i => i.Id)
             .Take(500)
             .ToListAsync(ct);
+    }
+
+    public async Task<PagedResult<Invoice>> QueryInvoicesAsync(ListQuery? query = null, CancellationToken ct = default)
+    {
+        EnsureFinanceAccess(Permissions.FinanceInvoicesView);
+        query ??= new ListQuery();
+        IQueryable<Invoice> q = TenantInvoices(_db.Invoices.AsNoTracking()).Include(i => i.Customer);
+        var pattern = PagingQueryableExtensions.ToILikePattern(query.Search);
+        if (pattern is not null)
+        {
+            q = q.Where(i =>
+                EF.Functions.ILike(i.InvoiceNumber, pattern) ||
+                (i.CustomerName != null && EF.Functions.ILike(i.CustomerName, pattern)) ||
+                (i.PurchaseOrderNumber != null && EF.Functions.ILike(i.PurchaseOrderNumber, pattern)) ||
+                (i.Salesperson != null && EF.Functions.ILike(i.Salesperson, pattern)) ||
+                (i.PaymentTerms != null && EF.Functions.ILike(i.PaymentTerms, pattern)) ||
+                (i.Notes != null && EF.Functions.ILike(i.Notes, pattern)) ||
+                (i.Customer != null && i.Customer.CompanyName != null && EF.Functions.ILike(i.Customer.CompanyName, pattern)));
+        }
+
+        return await q.OrderByDescending(i => i.Id).ToPagedResultAsync(query, ct);
     }
 
     public async Task<Invoice?> GetInvoiceAsync(int id, CancellationToken ct = default)
@@ -457,6 +480,28 @@ public class FinanceService : IFinanceService
             .ThenByDescending(p => p.Id)
             .Take(500)
             .ToListAsync(ct);
+    }
+
+    public async Task<PagedResult<InvoicePayment>> QueryPaymentsAsync(ListQuery? query = null, CancellationToken ct = default)
+    {
+        EnsureFinanceAccess(Permissions.FinancePaymentsRecord);
+        query ??= new ListQuery();
+        var companyId = RequireCompanyId();
+        var q = _db.InvoicePayments.AsNoTracking()
+            .Include(p => p.Invoice)
+            .Where(p => p.CompanyId == companyId);
+        var pattern = PagingQueryableExtensions.ToILikePattern(query.Search);
+        if (pattern is not null)
+        {
+            q = q.Where(p =>
+                (p.Reference != null && EF.Functions.ILike(p.Reference, pattern)) ||
+                (p.Method != null && EF.Functions.ILike(p.Method, pattern)) ||
+                (p.Notes != null && EF.Functions.ILike(p.Notes, pattern)) ||
+                (p.Invoice != null && EF.Functions.ILike(p.Invoice.InvoiceNumber, pattern)) ||
+                (p.Invoice != null && p.Invoice.CustomerName != null && EF.Functions.ILike(p.Invoice.CustomerName, pattern)));
+        }
+
+        return await q.OrderByDescending(p => p.PaymentDate).ThenByDescending(p => p.Id).ToPagedResultAsync(query, ct);
     }
 
     public async Task<(bool Ok, string? Error, InvoicePayment? Payment)> RecordPaymentAsync(

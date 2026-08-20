@@ -15,13 +15,17 @@
 
     <ImportExportPanel EntityKey="leads" />
 
+    <PagedListToolbar Query="_query" TotalCount="_total" Disabled="_loading"
+                      SearchPlaceholder="Search name, email, phone, company, status…"
+                      QueryChanged="OnQueryChangedAsync" />
+
     @if (_loading)
     {
         <p class="muted">Loading…</p>
     }
     else if (_items.Count == 0)
     {
-        <p class="muted">No leads yet.</p>
+        <p class="muted">No leads match the current search.</p>
     }
     else
     {
@@ -32,6 +36,7 @@
                         <th>Name</th>
                         <th>Company</th>
                         <th>Email</th>
+                        <th>Phone</th>
                         <th>Status</th>
                         <th>Source</th>
                         <th>Owner</th>
@@ -45,6 +50,7 @@
                             <td>@x.FirstName @x.LastName</td>
                             <td>@(x.CompanyName ?? "—")</td>
                             <td>@(x.Email ?? "—")</td>
+                            <td>@(x.Phone ?? x.Mobile ?? "—")</td>
                             <td><span class="pill ok">@(x.LeadStatus ?? "New")</span></td>
                             <td>@(x.LeadSource ?? "—")</td>
                             <td>@(x.LeadOwner ?? "—")</td>
@@ -59,11 +65,31 @@
 
 @code {
     private bool _loading = true;
+    private ListQuery _query = new();
+    private int _total;
     private List<Lead> _items = new();
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task OnQueryChangedAsync(ListQuery query)
     {
-        _items = (await Crm.ListLeadsAsync()).ToList();
-        _loading = false;
+        _query = query;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var page = await Crm.QueryLeadsAsync(_query);
+            _items = page.Items.ToList();
+            _total = page.TotalCount;
+            _query = new ListQuery { Search = _query.Search, Page = page.Page, PageSize = page.PageSize };
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 }
