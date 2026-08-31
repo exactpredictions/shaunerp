@@ -3,6 +3,7 @@ using ShaunERP.Core.Accounting;
 using ShaunERP.Core.Crm;
 using ShaunERP.Core.Finance;
 using ShaunERP.Core.Platform;
+using ShaunERP.Core.Sales;
 using ShaunERP.Infrastructure.Persistence;
 using ShaunERP.Infrastructure.Platform;
 using GlAccount = ShaunERP.Core.Finance.Account;
@@ -286,6 +287,7 @@ public class FinanceService : IFinanceService
 
         _db.Invoices.Add(invoice);
         await _db.SaveChangesAsync(ct);
+        await SyncLinkedSalesOrderAsync(invoice.SalesOrderId, ct);
         return invoice;
     }
 
@@ -300,6 +302,11 @@ public class FinanceService : IFinanceService
 
         if (row.InvoiceStatus is InvoiceStatus.Void or InvoiceStatus.Paid)
             throw new InvalidOperationException("Paid or void invoices cannot be edited.");
+
+        var previousStatus = row.InvoiceStatus;
+        var previousTotal = row.GrandTotal;
+        var previousTax = row.TaxTotal;
+        var previousCustomerId = row.CustomerId;
 
         row.CompanyId = RequireCompanyId();
         row.CustomerId = update.CustomerId;
@@ -354,6 +361,9 @@ public class FinanceService : IFinanceService
         RecalcInvoiceTotals(row);
         RefreshPaymentStatus(row);
         await _db.SaveChangesAsync(ct);
+        await SyncLinkedSalesOrderAsync(row.SalesOrderId, ct);
+        await ResyncInvoiceAccountingAfterEditAsync(
+            row, previousStatus, previousTotal, previousTax, previousCustomerId, ct);
         return row;
     }
 
@@ -368,8 +378,18 @@ public class FinanceService : IFinanceService
         if (row.InvoiceStatus is InvoiceStatus.Paid or InvoiceStatus.PartiallyPaid || row.Payments.Count > 0)
             throw new InvalidOperationException("Paid or partially paid invoices cannot be deleted. Void instead.");
 
+        var salesOrderId = row.SalesOrderId;
+        try
+        {
+            await ReverseInvoiceAccountingAsync(row, ct);
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
         _db.Invoices.Remove(row);
         await _db.SaveChangesAsync(ct);
+        await SyncLinkedSalesOrderAsync(salesOrderId, ct);
         return true;
     }
 
@@ -426,6 +446,7 @@ public class FinanceService : IFinanceService
         row.InvoiceStatus = InvoiceStatus.Void;
         row.IsPaid = false;
         await _db.SaveChangesAsync(ct);
+        await SyncLinkedSalesOrderAsync(row.SalesOrderId, ct);
 
         try
         {
@@ -813,6 +834,78 @@ public class FinanceService : IFinanceService
             return;
 
         await _accountingPosting.ReverseAsync(voucher.Id, $"Invoice {invoice.InvoiceNumber} voided", ct);
+    }
+
+    private async Task SyncLinkedSalesOrderAsync(int? salesOrderId, CancellationToken ct)
+    {
+        if (salesOrderId is not int orderId)
+            return;
+
+        var companyId = RequireCompanyId();
+        var order = await _db.SalesOrders.FirstOrDefaultAsync(
+            o => o.Id == orderId && o.CompanyId == companyId, ct);
+        if (order is null)
+            return;
+
+        var invoices = await _db.Invoices.AsNoTracking()
+            .Where(i => i.SalesOrderId == order.Id && i.CompanyId == order.CompanyId)
+            .Where(i => i.InvoiceStatus != InvoiceStatus.Void)
+            .ToListAsync(ct);
+        order.AmountInvoiced = invoices.Sum(i => i.GrandTotal > 0 ? i.GrandTotal : i.Amount);
+
+        if (order.OrderStatus == SalesOrderStatus.Cancelled)
+        {
+            await _db.SaveChangesAsync(ct);
+            return;
+        }
+
+        if (order.AmountInvoiced <= 0.01m)
+        {
+            if (order.OrderStatus is SalesOrderStatus.PartiallyInvoiced or SalesOrderStatus.Invoiced)
+                order.OrderStatus = SalesOrderStatus.Confirmed;
+        }
+        else if (order.AmountInvoiced + 0.01m >= order.GrandTotal)
+            order.OrderStatus = SalesOrderStatus.Invoiced;
+        else
+            order.OrderStatus = SalesOrderStatus.PartiallyInvoiced;
+
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private async Task ResyncInvoiceAccountingAfterEditAsync(
+        Invoice invoice,
+        InvoiceStatus previousStatus,
+        decimal previousTotal,
+        decimal previousTax,
+        int? previousCustomerId,
+        CancellationToken ct)
+    {
+        var issued = invoice.InvoiceStatus is InvoiceStatus.Sent or InvoiceStatus.PartiallyPaid or InvoiceStatus.Paid;
+        var wasIssued = previousStatus is InvoiceStatus.Sent or InvoiceStatus.PartiallyPaid or InvoiceStatus.Paid;
+        var financialsChanged = invoice.GrandTotal != previousTotal
+            || invoice.TaxTotal != previousTax
+            || invoice.CustomerId != previousCustomerId
+            || invoice.InvoiceStatus != previousStatus;
+
+        if (!financialsChanged)
+            return;
+
+        try
+        {
+            if (wasIssued)
+            {
+                await ReverseInvoiceAccountingAsync(invoice, ct);
+                invoice.AccountingVoucherId = null;
+                await _db.SaveChangesAsync(ct);
+            }
+
+            if (issued)
+                await PostInvoiceAccountingAsync(invoice, ct);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Accounting module may be disabled; invoice edit still succeeds.
+        }
     }
 
     private IQueryable<Invoice> TenantInvoices(IQueryable<Invoice> query)
