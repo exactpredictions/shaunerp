@@ -398,6 +398,14 @@ public sealed class SalesOrderService : ISalesOrderService
         if (existing is not null)
             return await GetOrderAsync(existing.Id, ct);
 
+        // Quote lines store Discount as an absolute amount (qty * price - discount).
+        // Sales order lines store Discount as a percent (0–100). Copying the raw
+        // value treats e.g. a ₹100 line discount as 100% off and zeros the line.
+        var quoteSubtotal = quote.Subtotal > 0
+            ? quote.Subtotal
+            : quote.Lines.Sum(l => Math.Max(0, l.Quantity * l.UnitPrice - l.Discount));
+        var lineTaxRate = HeaderTaxToLineRate(quoteSubtotal, quote.Tax);
+
         var order = new SalesOrder
         {
             CustomerId = quote.CustomerId,
@@ -406,6 +414,8 @@ public sealed class SalesOrderService : ISalesOrderService
             CurrencyCode = quote.CurrencyCode ?? "USD",
             Notes = quote.Description,
             Terms = quote.Terms,
+            Salesperson = quote.QuoteOwner,
+            Discount = Math.Max(0, quote.Discount),
             Lines = quote.Lines.OrderBy(l => l.Id).Select((l, i) => new SalesOrderLine
             {
                 ProductId = l.ProductId,
@@ -413,13 +423,30 @@ public sealed class SalesOrderService : ISalesOrderService
                 Description = l.Description ?? l.ProductName,
                 Quantity = l.Quantity,
                 UnitPrice = l.UnitPrice,
-                Discount = l.Discount,
-                TaxRate = 0,
+                Discount = AbsoluteDiscountToPercent(l.Quantity, l.UnitPrice, l.Discount),
+                TaxRate = lineTaxRate,
                 SortOrder = i
             }).ToList()
         };
 
         return await CreateOrderAsync(order, ct);
+    }
+
+    private static decimal AbsoluteDiscountToPercent(decimal quantity, decimal unitPrice, decimal absoluteDiscount)
+    {
+        var gross = quantity * unitPrice;
+        if (gross <= 0 || absoluteDiscount <= 0)
+            return 0;
+        return Math.Clamp(
+            Math.Round(absoluteDiscount / gross * 100m, 4, MidpointRounding.AwayFromZero),
+            0m, 100m);
+    }
+
+    private static decimal HeaderTaxToLineRate(decimal subtotal, decimal tax)
+    {
+        if (subtotal <= 0 || tax <= 0)
+            return 0;
+        return Math.Round(tax / subtotal * 100m, 4, MidpointRounding.AwayFromZero);
     }
 
     private async Task RefreshInvoicedAmountAsync(SalesOrder order, CancellationToken ct)
