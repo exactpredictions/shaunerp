@@ -448,6 +448,9 @@ public class FinanceService : IFinanceService
         if (row.InvoiceStatus == InvoiceStatus.Void)
             throw new InvalidOperationException("Cannot mark a void invoice as paid.");
 
+        // Collecting on a draft never goes through MarkSent, so post the sales voucher first.
+        await TryPostInvoiceAccountingAsync(row, ct);
+
         var remaining = row.BalanceDue;
         if (remaining > 0)
         {
@@ -521,6 +524,17 @@ public class FinanceService : IFinanceService
         if (payment.Amount > balance + 0.01m)
             return (false, $"Payment exceeds balance due ({balance:N2}).", null);
 
+        // The invoice editor lets users record payment on drafts; that path used to skip
+        // MarkSent, so AutoPostSalesInvoice never ran and revenue never hit the books.
+        try
+        {
+            await TryPostInvoiceAccountingAsync(row, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return (false, ex.Message, null);
+        }
+
         var entity = new InvoicePayment
         {
             CompanyId = row.CompanyId,
@@ -535,10 +549,6 @@ public class FinanceService : IFinanceService
         row.Payments.Add(entity);
         row.AmountPaid = row.Payments.Sum(p => p.Amount);
         RefreshPaymentStatus(row);
-        if (row.InvoiceStatus == InvoiceStatus.Draft)
-            row.InvoiceStatus = InvoiceStatus.Sent;
-        RefreshPaymentStatus(row);
-
         await _db.SaveChangesAsync(ct);
         return (true, null, entity);
     }
@@ -693,6 +703,23 @@ public class FinanceService : IFinanceService
         invoice.IsPaid = invoice.InvoiceStatus == InvoiceStatus.Paid;
         if (invoice.IsPaid)
             invoice.AmountPaid = invoice.GrandTotal > 0 ? invoice.GrandTotal : invoice.Amount;
+    }
+
+    /// <summary>
+    /// Posts the sales voucher when collecting against an invoice that never went through
+    /// <see cref="MarkSentAsync"/>. Idempotent for invoices that already have a voucher.
+    /// Accounting entitlement failures are ignored so AR collection still succeeds.
+    /// </summary>
+    private async Task TryPostInvoiceAccountingAsync(Invoice invoice, CancellationToken ct)
+    {
+        try
+        {
+            await PostInvoiceAccountingAsync(invoice, ct);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Accounting module may be disabled; invoicing still succeeds.
+        }
     }
 
     private async Task PostInvoiceAccountingAsync(Invoice invoice, CancellationToken ct)
