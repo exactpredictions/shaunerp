@@ -775,7 +775,7 @@ public class FinanceService : IFinanceService
             });
         }
 
-        var voucher = await _accountingPosting.PostAsync(new AccountingPostingRequest
+        var voucher = await _accountingPosting.PostIntegrationAsync(new AccountingPostingRequest
         {
             TransactionDate = invoice.InvoiceDate,
             VoucherTypeCode = SystemVoucherTypeCodes.Sales,
@@ -812,7 +812,7 @@ public class FinanceService : IFinanceService
         if (voucher is null || voucher.VoucherStatus != VoucherStatus.Posted)
             return;
 
-        await _accountingPosting.ReverseAsync(voucher.Id, $"Invoice {invoice.InvoiceNumber} voided", ct);
+        await _accountingPosting.ReverseIntegrationAsync(voucher.Id, $"Invoice {invoice.InvoiceNumber} voided", ct);
     }
 
     private IQueryable<Invoice> TenantInvoices(IQueryable<Invoice> query)
