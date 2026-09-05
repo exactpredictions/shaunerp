@@ -398,6 +398,11 @@ public sealed class SalesOrderService : ISalesOrderService
         if (existing is not null)
             return await GetOrderAsync(existing.Id, ct);
 
+        // Quotes created in the UI only store AccountName/ContactName — they never
+        // set CustomerId. ValidateOrder requires a customer, so conversion failed
+        // for every UI-created accepted quote.
+        quote.CustomerId = await ResolveCustomerForQuoteAsync(quote, ct);
+
         var order = new SalesOrder
         {
             CustomerId = quote.CustomerId,
@@ -420,6 +425,80 @@ public sealed class SalesOrderService : ISalesOrderService
         };
 
         return await CreateOrderAsync(order, ct);
+    }
+
+    private async Task<int> ResolveCustomerForQuoteAsync(Quote quote, CancellationToken ct)
+    {
+        var companyId = RequireCompanyId();
+
+        if (quote.CustomerId is int customerId && customerId > 0)
+        {
+            var existing = await _db.CrmCustomers
+                .FirstOrDefaultAsync(c => c.Id == customerId && c.CompanyId == companyId, ct);
+            if (existing is not null)
+                return existing.Id;
+        }
+
+        if (quote.OpportunityId is int opportunityId)
+        {
+            var deal = await _db.Opportunities.AsNoTracking()
+                .FirstOrDefaultAsync(o => o.Id == opportunityId && o.CompanyId == companyId, ct);
+            if (deal?.CustomerId is int dealCustomerId)
+            {
+                var fromDeal = await _db.CrmCustomers
+                    .FirstOrDefaultAsync(c => c.Id == dealCustomerId && c.CompanyId == companyId, ct);
+                if (fromDeal is not null)
+                    return fromDeal.Id;
+            }
+        }
+
+        if (quote.AccountId is int accountId)
+        {
+            var fromAccount = await _db.CrmCustomers
+                .FirstOrDefaultAsync(c => c.CompanyId == companyId && c.AccountId == accountId, ct);
+            if (fromAccount is not null)
+                return fromAccount.Id;
+        }
+
+        var name = FirstNonBlank(quote.AccountName, quote.ContactName, quote.Subject);
+        if (string.IsNullOrWhiteSpace(name))
+            throw new InvalidOperationException(
+                "Quote needs an account or customer before it can become a sales order.");
+
+        var normalized = name.ToLower();
+        var byName = await _db.CrmCustomers
+            .FirstOrDefaultAsync(c =>
+                c.CompanyId == companyId
+                && c.CompanyName != null
+                && c.CompanyName.ToLower() == normalized, ct);
+        if (byName is not null)
+            return byName.Id;
+
+        var customer = new Customer
+        {
+            CompanyId = companyId,
+            CompanyName = name,
+            PrimaryContact = NullIfBlank(quote.ContactName),
+            CustomerOwner = NullIfBlank(quote.QuoteOwner),
+            AccountId = quote.AccountId,
+            CustomerType = "Business",
+            PaymentTerms = "Net 30",
+            CreatedDate = DateTime.UtcNow
+        };
+        _db.CrmCustomers.Add(customer);
+        await _db.SaveChangesAsync(ct);
+        return customer.Id;
+    }
+
+    private static string? FirstNonBlank(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+                return value.Trim();
+        }
+
+        return null;
     }
 
     private async Task RefreshInvoicedAmountAsync(SalesOrder order, CancellationToken ct)
