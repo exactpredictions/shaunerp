@@ -180,6 +180,49 @@ public class AccountingTests
         Assert.True(bs.IsBalanced);
     }
 
+    [Fact]
+    public async Task ProfitAndLoss_DefaultPeriod_UsesFinancialYearContainingAsOf_NotCalendarApril()
+    {
+        var (db, _, posting, accounting, reports) = await CreateAsync();
+        await accounting.EnsureBootstrapAsync();
+
+        // Prior Indian FY so a Jan–Mar as-of date is a real, posted period.
+        db.FinancialYears.Add(new FinancialYear
+        {
+            CompanyId = 1,
+            Name = "2025-2026",
+            StartDate = new DateTime(2025, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+            EndDate = new DateTime(2026, 3, 31, 0, 0, 0, DateTimeKind.Utc),
+            IsCurrent = false,
+            CreatedDate = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var bank = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.BankDefault);
+        var sales = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.Sales);
+        var asOf = new DateTime(2026, 2, 15, 0, 0, 0, DateTimeKind.Utc);
+
+        await posting.PostAsync(new AccountingPostingRequest
+        {
+            TransactionDate = new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc),
+            VoucherTypeCode = SystemVoucherTypeCodes.Journal,
+            Lines =
+            [
+                new() { LedgerId = bank.Id, Debit = 80000 },
+                new() { LedgerId = sales.Id, Credit = 80000 }
+            ]
+        });
+
+        // Default from was DateTime.UtcNow.Year/4/1 (e.g. 2026-04-01), which is after asOf
+        // and dropped all Jan–Mar activity — P&L empty and the balance sheet unbalanced.
+        var pl = await reports.GetProfitAndLossAsync(null, asOf);
+        Assert.Equal(80000m, pl.NetProfit);
+
+        var bs = await reports.GetBalanceSheetAsync(asOf);
+        Assert.True(bs.IsBalanced);
+        Assert.Contains(bs.Equity, r => r.Label == "Current Year Profit / Loss" && r.Amount == 80000m);
+    }
+
     private static async Task<(ShaunErpDbContext db, TenantContext tenant, AccountingPostingService posting, AccountingService accounting, AccountingReportService reports)> CreateAsync()
     {
         var options = new DbContextOptionsBuilder<ShaunErpDbContext>()
