@@ -91,8 +91,8 @@ public sealed class AccountingReportService : IAccountingReportService
     {
         EnsureAccess();
         var companyId = RequireCompanyId();
-        var fromDate = (from ?? new DateTime(DateTime.UtcNow.Year, 4, 1, 0, 0, 0, DateTimeKind.Utc)).Date;
         var toDate = (to ?? DateTime.UtcNow.Date).Date;
+        var fromDate = (from ?? await ResolveFinancialYearStartAsync(toDate, ct)).Date;
 
         var ledgers = await _db.Ledgers.AsNoTracking().Where(l => l.CompanyId == companyId && l.IsActive).ToListAsync(ct);
         var lines = await _db.AccountingVoucherLines.AsNoTracking()
@@ -132,8 +132,8 @@ public sealed class AccountingReportService : IAccountingReportService
     {
         EnsureAccess();
         var companyId = RequireCompanyId();
-        var fromDate = (from ?? new DateTime(DateTime.UtcNow.Year, 4, 1, 0, 0, 0, DateTimeKind.Utc)).Date;
         var toDate = (to ?? DateTime.UtcNow.Date).Date;
+        var fromDate = (from ?? await ResolveFinancialYearStartAsync(toDate, ct)).Date;
 
         var lines = await _db.AccountingVoucherLines.AsNoTracking()
             .Include(l => l.Ledger)
@@ -196,7 +196,7 @@ public sealed class AccountingReportService : IAccountingReportService
             .Select(l => new BsSectionRow(l.LedgerName, -Closing(l)))
             .Where(r => r.Amount != 0).OrderByDescending(r => r.Amount).ToList();
 
-        // Current year P&L into equity
+        // Current year P&L into equity — period is the financial year that contains asOf.
         var pl = await GetProfitAndLossAsync(null, asOfDate, ct);
         if (pl.NetProfit != 0)
             equity.Add(new BsSectionRow("Current Year Profit / Loss", pl.NetProfit));
@@ -286,6 +286,29 @@ public sealed class AccountingReportService : IAccountingReportService
             l.Voucher!.VoucherDate, l.Voucher.VoucherNumber, l.Voucher.VoucherType?.Name ?? "",
             l.Ledger?.LedgerName ?? "", l.Description ?? l.Voucher.Narration,
             l.DebitAmount, l.CreditAmount, l.VoucherId)).ToList();
+    }
+
+    /// <summary>
+    /// Start of the financial year that contains <paramref name="asOf"/>.
+    /// Uses the company FY when one covers that date; otherwise Indian FY (1 Apr–31 Mar).
+    /// </summary>
+    private static DateTime FallbackIndianFinancialYearStart(DateTime asOf)
+    {
+        var d = asOf.Date;
+        var start = new DateTime(d.Year, 4, 1, 0, 0, 0, DateTimeKind.Utc);
+        return d < start ? start.AddYears(-1) : start;
+    }
+
+    private async Task<DateTime> ResolveFinancialYearStartAsync(DateTime asOf, CancellationToken ct)
+    {
+        var companyId = RequireCompanyId();
+        var d = asOf.Date;
+        var fy = await _db.FinancialYears.AsNoTracking()
+            .Where(y => y.CompanyId == companyId && y.StartDate <= d && y.EndDate >= d)
+            .OrderByDescending(y => y.IsCurrent)
+            .ThenByDescending(y => y.StartDate)
+            .FirstOrDefaultAsync(ct);
+        return fy is not null ? fy.StartDate.Date : FallbackIndianFinancialYearStart(d);
     }
 
     private void EnsureAccess()

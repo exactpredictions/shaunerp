@@ -144,7 +144,7 @@
     private string? _error;
     private string _title = "Report";
     private string _reportKey = "tb";
-    private DateTime _from = new(DateTime.UtcNow.Year, 4, 1);
+    private DateTime _from = DefaultFinancialYearStart(DateTime.UtcNow.Date);
     private DateTime _to = DateTime.UtcNow.Date;
     private int _ledgerId;
     private List<Ledger> _ledgers = new();
@@ -188,6 +188,9 @@
         try
         {
             await Accounting.EnsureBootstrapAsync();
+            var fy = await Accounting.GetCurrentFinancialYearAsync();
+            if (fy is not null)
+                _from = fy.StartDate.Date;
             if (_reportKey is "gl" or "cash" or "bank")
                 _ledgers = (await Accounting.ListLedgersAsync()).ToList();
             await LoadAsync();
@@ -217,5 +220,12 @@
             }
         }
         catch (Exception ex) { _error = ex.Message; }
+    }
+
+    /// <summary>Indian FY (1 Apr–31 Mar) containing <paramref name="asOf"/> — used before company FY is loaded.</summary>
+    private static DateTime DefaultFinancialYearStart(DateTime asOf)
+    {
+        var start = new DateTime(asOf.Year, 4, 1);
+        return asOf.Date < start.Date ? start.AddYears(-1) : start;
     }
 }
