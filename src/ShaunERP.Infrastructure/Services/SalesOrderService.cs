@@ -334,11 +334,19 @@ public sealed class SalesOrderService : ISalesOrderService
             return (false, "Cannot invoice a cancelled order.", null);
         if (row.OrderStatus == SalesOrderStatus.Draft)
             return (false, "Confirm the order before creating an invoice.", null);
+
+        // Linked invoices created via Finance may not have updated AmountInvoiced yet.
+        await RefreshInvoicedAmountAsync(row, ct);
         if (row.OrderStatus == SalesOrderStatus.Invoiced || row.BalanceToInvoice <= 0.01m)
+        {
+            await _db.SaveChangesAsync(ct);
             return (false, "Order is already fully invoiced.", null);
+        }
 
         ValidateOrder(row);
 
+        var remaining = row.BalanceToInvoice;
+        var alreadyInvoiced = row.AmountInvoiced > 0.01m;
         var invoice = new Invoice
         {
             CustomerId = row.CustomerId,
@@ -354,19 +362,11 @@ public sealed class SalesOrderService : ISalesOrderService
                 ? $"Created from sales order {row.OrderNumber}"
                 : row.Notes,
             Terms = row.Terms,
-            Discount = row.Discount,
+            Discount = alreadyInvoiced ? 0 : row.Discount,
             InvoiceStatus = InvoiceStatus.Draft,
-            Lines = row.Lines.OrderBy(l => l.SortOrder).Select(l => new InvoiceLine
-            {
-                ProductId = l.ProductId,
-                ProductName = l.ProductName ?? "",
-                Description = l.Description,
-                Quantity = l.Quantity,
-                UnitPrice = l.UnitPrice,
-                Discount = l.Discount,
-                TaxRate = l.TaxRate,
-                SortOrder = l.SortOrder
-            }).ToList()
+            Lines = alreadyInvoiced
+                ? BuildRemainderInvoiceLines(row.OrderNumber, remaining)
+                : CloneOrderLinesForInvoice(row)
         };
 
         try
@@ -421,6 +421,34 @@ public sealed class SalesOrderService : ISalesOrderService
 
         return await CreateOrderAsync(order, ct);
     }
+
+    private static List<InvoiceLine> CloneOrderLinesForInvoice(SalesOrder order) =>
+        order.Lines.OrderBy(l => l.SortOrder).Select(l => new InvoiceLine
+        {
+            ProductId = l.ProductId,
+            ProductName = l.ProductName ?? "",
+            Description = l.Description,
+            Quantity = l.Quantity,
+            UnitPrice = l.UnitPrice,
+            Discount = l.Discount,
+            TaxRate = l.TaxRate,
+            SortOrder = l.SortOrder
+        }).ToList();
+
+    // BalanceToInvoice already includes tax and header discount; do not re-apply them.
+    private static List<InvoiceLine> BuildRemainderInvoiceLines(string orderNumber, decimal remaining) =>
+    [
+        new InvoiceLine
+        {
+            ProductName = $"Balance of {orderNumber}",
+            Description = "Remaining amount to invoice",
+            Quantity = 1,
+            UnitPrice = remaining,
+            Discount = 0,
+            TaxRate = 0,
+            SortOrder = 0
+        }
+    ];
 
     private async Task RefreshInvoicedAmountAsync(SalesOrder order, CancellationToken ct)
     {
