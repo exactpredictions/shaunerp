@@ -326,7 +326,11 @@ public partial class CrmService : ICrmService
         lead.CreatedDate = DateTime.UtcNow;
         if (string.IsNullOrWhiteSpace(lead.LeadStatus)) lead.LeadStatus = "New";
 
-        if (lead.PartyId is null)
+        if (lead.PartyId is int partyId)
+        {
+            await EnsureOwnedPartyAsync(partyId, ct);
+        }
+        else
         {
             var ensure = await _parties.EnsurePersonPartyAsync(new EnsurePartyRequest
             {
@@ -388,14 +392,9 @@ public partial class CrmService : ICrmService
         lead.Territory = update.Territory;
         lead.CampaignId = update.CampaignId;
         lead.Tags = update.Tags;
-        if (update.PartyId is not null)
-        {
-            lead.PartyId = update.PartyId;
-        }
-        else if (lead.PartyId is int partyId)
-        {
-            await _parties.AttachContactChannelsAsync(partyId, lead.Phone, lead.Mobile, lead.Email, lead.SecondaryEmail, ct);
-        }
+        lead.PartyId = await EnsureAndAttachPartyAsync(
+            lead.PartyId, update.PartyId, lead.FirstName, lead.LastName,
+            lead.Phone, lead.Mobile, lead.Email, lead.SecondaryEmail, ct);
 
         await _db.SaveChangesAsync(ct);
         return lead;
@@ -579,7 +578,11 @@ public partial class CrmService : ICrmService
         prospect.CompanyId = RequireCompanyId();
         prospect.CreatedDate = DateTime.UtcNow;
         if (string.IsNullOrWhiteSpace(prospect.Stage)) prospect.Stage = "Engaged";
-        if (prospect.PartyId is null)
+        if (prospect.PartyId is int partyId)
+        {
+            await EnsureOwnedPartyAsync(partyId, ct);
+        }
+        else
         {
             var ensure = await _parties.EnsurePersonPartyAsync(new EnsurePartyRequest
             {
@@ -654,7 +657,11 @@ public partial class CrmService : ICrmService
         contact.Id = 0;
         contact.CompanyId = RequireCompanyId();
         contact.CreatedDate = DateTime.UtcNow;
-        if (contact.PartyId is null)
+        if (contact.PartyId is int partyId)
+        {
+            await EnsureOwnedPartyAsync(partyId, ct);
+        }
+        else
         {
             var ensure = await _parties.EnsurePersonPartyAsync(new EnsurePartyRequest
             {
@@ -763,7 +770,10 @@ public partial class CrmService : ICrmService
         if (string.IsNullOrWhiteSpace(deal.Pipeline)) deal.Pipeline = "Standard";
         if (string.IsNullOrWhiteSpace(deal.ForecastCategory)) deal.ForecastCategory = "Pipeline";
         ApplyStageProbability(deal);
-        deal.PartyId ??= await ResolveRelatedPartyIdAsync(deal, ct);
+        if (deal.PartyId is int partyId)
+            await EnsureOwnedPartyAsync(partyId, ct);
+        else
+            deal.PartyId = await ResolveRelatedPartyIdAsync(deal, ct);
         _db.Opportunities.Add(deal);
         await _db.SaveChangesAsync(ct);
         return deal;
@@ -806,7 +816,15 @@ public partial class CrmService : ICrmService
         row.CurrencyCode = update.CurrencyCode;
         row.Tags = update.Tags;
         ApplyStageProbability(row);
-        row.PartyId = update.PartyId ?? row.PartyId ?? await ResolveRelatedPartyIdAsync(row, ct);
+        if (update.PartyId is int incomingPartyId)
+        {
+            await EnsureOwnedPartyAsync(incomingPartyId, ct);
+            row.PartyId = incomingPartyId;
+        }
+        else
+        {
+            row.PartyId ??= await ResolveRelatedPartyIdAsync(row, ct);
+        }
 
         await _db.SaveChangesAsync(ct);
         return row;
@@ -955,8 +973,11 @@ public partial class CrmService : ICrmService
         customer.CreatedDate = DateTime.UtcNow;
         // Customer remains the commercial bill-to master. PartyId is optional identity linkage only.
         // Do not invent a new Party from company name alone — that is org territory (CrmAccount).
-        if (customer.PartyId is null &&
-            (!string.IsNullOrWhiteSpace(customer.Email) || !string.IsNullOrWhiteSpace(customer.PhoneNumber)))
+        if (customer.PartyId is int partyId)
+        {
+            await EnsureOwnedPartyAsync(partyId, ct);
+        }
+        else if (!string.IsNullOrWhiteSpace(customer.Email) || !string.IsNullOrWhiteSpace(customer.PhoneNumber))
         {
             var names = (customer.PrimaryContact ?? string.Empty).Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
             var ensure = await _parties.EnsurePersonPartyAsync(new EnsurePartyRequest
@@ -1140,6 +1161,15 @@ public partial class CrmService : ICrmService
         return true;
     }
 
+    private async Task EnsureOwnedPartyAsync(int partyId, CancellationToken ct)
+    {
+        var companyId = RequireCompanyId();
+        var owned = await _db.Parties.AsNoTracking()
+            .AnyAsync(p => p.Id == partyId && p.CompanyId == companyId, ct);
+        if (!owned)
+            throw new InvalidOperationException("Party not found for this account.");
+    }
+
     private async Task<int?> EnsureAndAttachPartyAsync(
         int? existingPartyId,
         int? incomingPartyId,
@@ -1152,13 +1182,12 @@ public partial class CrmService : ICrmService
         CancellationToken ct,
         string? displayName = null)
     {
-        if (incomingPartyId is not null)
-            return incomingPartyId;
-
-        if (existingPartyId is int partyId)
+        var partyId = incomingPartyId ?? existingPartyId;
+        if (partyId is int id)
         {
-            await _parties.AttachContactChannelsAsync(partyId, phone, mobile, email, secondaryEmail, ct);
-            return partyId;
+            await EnsureOwnedPartyAsync(id, ct);
+            await _parties.AttachContactChannelsAsync(id, phone, mobile, email, secondaryEmail, ct);
+            return id;
         }
 
         if (string.IsNullOrWhiteSpace(phone)
