@@ -302,6 +302,76 @@ public class PartyIdentityTests
             e => (e.NormalizedEmail ?? e.OriginalEmail)!.Contains("nila.rao@example.com"));
     }
 
+    [Fact]
+    public async Task Lead_update_round_tripping_party_id_syncs_new_phone_and_email()
+    {
+        await using var db = CreateDb();
+        var crm = CreateCrm(db, companyId: 1);
+        var lead = await crm.CreateLeadAsync(new Lead
+        {
+            FirstName = "Anita",
+            LastName = "Shah",
+            Mobile = "9876500001",
+            Email = "anita@old.example"
+        });
+        Assert.NotNull(lead.PartyId);
+
+        lead.Mobile = "9876500002";
+        lead.Email = "anita@new.example";
+        var updated = await crm.UpdateLeadAsync(lead.Id, lead);
+
+        Assert.Equal(lead.PartyId, updated!.PartyId);
+        var phones = await db.PartyPhones.Where(p => p.PartyId == lead.PartyId).ToListAsync();
+        var emails = await db.PartyEmails.Where(e => e.PartyId == lead.PartyId).ToListAsync();
+        Assert.Contains(phones, p => p.NormalizedPhone == "9876500002");
+        Assert.Contains(emails, e => e.NormalizedEmail == "anita@new.example");
+    }
+
+    [Fact]
+    public async Task Lead_create_rejects_party_from_another_company()
+    {
+        await using var db = CreateDb();
+        var foreign = await SeedPartyAsync(db, 2, "Other", "Tenant", "9111100000", "other@tenant.example");
+        var crm = CreateCrm(db, companyId: 1);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => crm.CreateLeadAsync(new Lead
+        {
+            FirstName = "Attack",
+            LastName = "Vector",
+            Mobile = "9222200000",
+            Email = "attack@example.com",
+            PartyId = foreign.Id
+        }));
+        Assert.Contains("Party not found", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(await db.Leads.AnyAsync(l => l.CompanyId == 1));
+        Assert.False(await db.PartyPhones.AnyAsync(p => p.PartyId == foreign.Id && p.NormalizedPhone == "9222200000"));
+    }
+
+    [Fact]
+    public async Task Lead_update_rejects_relinking_to_another_company_party()
+    {
+        await using var db = CreateDb();
+        var crm = CreateCrm(db, companyId: 1);
+        var lead = await crm.CreateLeadAsync(new Lead
+        {
+            FirstName = "Mina",
+            LastName = "Iyer",
+            Mobile = "9333300000",
+            Email = "mina@example.com"
+        });
+        var ownPartyId = lead.PartyId;
+        var foreign = await SeedPartyAsync(db, 2, "Other", "Tenant", "9444400000", "other@tenant.example");
+
+        lead.PartyId = foreign.Id;
+        lead.Mobile = "9555500000";
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => crm.UpdateLeadAsync(lead.Id, lead));
+        Assert.Contains("Party not found", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        var stored = await db.Leads.AsNoTracking().SingleAsync(l => l.Id == lead.Id);
+        Assert.Equal(ownPartyId, stored.PartyId);
+        Assert.False(await db.PartyPhones.AnyAsync(p => p.PartyId == foreign.Id && p.NormalizedPhone == "9555500000"));
+    }
+
     private static ShaunErpDbContext CreateDb()
     {
         var options = new DbContextOptionsBuilder<ShaunErpDbContext>()
