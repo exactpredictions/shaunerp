@@ -166,6 +166,80 @@ public class ProjectManagementTests
     }
 
     [Fact]
+    public async Task Timesheet_RejectRemovesHoursFromTaskAndProject()
+    {
+        await using var db = NewDb();
+        await SeedCompaniesAsync(db);
+        var service = NewService(db, companyId: 1, userId: 10);
+
+        var project = await service.CreateProjectAsync(new Project { Name = "Support retainer" });
+        var task = await service.CreateTaskAsync(new ProjectTask { ProjectId = project.Id, Name = "Triage" });
+
+        var entry = await service.CreateTimesheetAsync(new ProjectTimesheet
+        {
+            ProjectId = project.Id,
+            TaskId = task.Id,
+            Hours = 8m,
+            BillableHours = 8m,
+            WorkDate = new DateTime(2026, 2, 10)
+        });
+
+        await service.SubmitTimesheetAsync(entry.Id);
+
+        var afterSubmitTask = await service.GetTaskAsync(task.Id);
+        var afterSubmitProject = await service.GetProjectAsync(project.Id);
+        Assert.Equal(8m, afterSubmitTask!.ActualHours);
+        Assert.Equal(8m, afterSubmitProject!.ActualHours);
+
+        var rejected = await service.RejectTimesheetAsync(entry.Id, "Wrong project");
+        Assert.NotNull(rejected);
+        Assert.Equal(TimesheetEntryStatus.Rejected, rejected!.EntryStatus);
+
+        var afterRejectTask = await service.GetTaskAsync(task.Id);
+        var afterRejectProject = await service.GetProjectAsync(project.Id);
+        Assert.Equal(0m, afterRejectTask!.ActualHours);
+        Assert.Equal(0m, afterRejectProject!.ActualHours);
+    }
+
+    [Fact]
+    public async Task ApproveChangeRequest_DoesNotInflateBudgetOnSecondApprove()
+    {
+        await using var db = NewDb();
+        await SeedCompaniesAsync(db);
+        var service = NewService(db, companyId: 1, userId: 10);
+
+        var project = await service.CreateProjectAsync(new Project
+        {
+            Name = "Website",
+            Budget = 10000m,
+            EstimatedHours = 40
+        });
+        var change = await service.CreateChangeRequestAsync(new ProjectChangeRequest
+        {
+            ProjectId = project.Id,
+            Description = "Add checkout",
+            EstimatedCost = 2500m,
+            EstimatedHours = 10,
+            ApprovalStatus = ChangeRequestApprovalStatus.Submitted
+        });
+
+        var first = await service.ApproveChangeRequestAsync(change.Id, approved: true);
+        Assert.NotNull(first);
+        Assert.Equal(ChangeRequestApprovalStatus.Approved, first!.ApprovalStatus);
+
+        var afterFirst = await service.GetProjectAsync(project.Id);
+        Assert.Equal(12500m, afterFirst!.RevisedBudget);
+        Assert.Equal(50m, afterFirst.EstimatedHours);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.ApproveChangeRequestAsync(change.Id, approved: true));
+
+        var afterSecond = await service.GetProjectAsync(project.Id);
+        Assert.Equal(12500m, afterSecond!.RevisedBudget);
+        Assert.Equal(50m, afterSecond.EstimatedHours);
+    }
+
+    [Fact]
     public async Task MissingPermission_BlocksProjectCreation()
     {
         await using var db = NewDb();
