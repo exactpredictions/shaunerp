@@ -758,6 +758,13 @@ public sealed partial class ProjectManagementService
         var companyId = RequireCompanyId();
         var row = await _db.ProjectChangeRequests.FirstOrDefaultAsync(c => c.Id == id && c.CompanyId == companyId, ct);
         if (row is null) return null;
+        if (row.ApprovalStatus is ChangeRequestApprovalStatus.Approved
+            or ChangeRequestApprovalStatus.Rejected
+            or ChangeRequestApprovalStatus.Implemented)
+        {
+            throw new InvalidOperationException("This change request has already been decided.");
+        }
+
         var project = await RequireProjectAsync(row.ProjectId, ct);
 
         row.ApprovalStatus = approved ? ChangeRequestApprovalStatus.Approved : ChangeRequestApprovalStatus.Rejected;
@@ -913,6 +920,7 @@ public sealed partial class ProjectManagementService
         if (!string.IsNullOrWhiteSpace(reason))
             row.Description = $"{row.Description} · Rejected: {reason.Trim()}".Trim(' ', '·');
         await _db.SaveChangesAsync(ct);
+        await SyncTaskAndProjectHoursAsync(row.ProjectId, row.TaskId, ct);
         await AuditAsync("projects.timesheet.rejected", "ProjectTimesheet", row.Id, reason, ct);
         return row;
     }
