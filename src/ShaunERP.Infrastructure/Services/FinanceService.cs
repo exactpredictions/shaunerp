@@ -352,6 +352,7 @@ public class FinanceService : IFinanceService
 
         ValidateInvoice(row);
         RecalcInvoiceTotals(row);
+        EnsureTotalCoversPayments(row);
         RefreshPaymentStatus(row);
         await _db.SaveChangesAsync(ct);
         return row;
@@ -653,6 +654,17 @@ public class FinanceService : IFinanceService
         invoice.GrandTotal = Math.Round(afterDiscount + invoice.TaxTotal, 2);
         invoice.Amount = invoice.GrandTotal;
         invoice.AmountPaid = invoice.Payments?.Sum(p => p.Amount) ?? invoice.AmountPaid;
+    }
+
+    private static void EnsureTotalCoversPayments(Invoice invoice)
+    {
+        var paid = invoice.Payments?.Sum(p => p.Amount) ?? invoice.AmountPaid;
+        var total = invoice.GrandTotal > 0 ? invoice.GrandTotal : invoice.Amount;
+        if (paid > total + 0.01m)
+        {
+            throw new InvalidOperationException(
+                "Cannot reduce the invoice below the amount already paid.");
+        }
     }
 
     private static void RefreshPaymentStatus(Invoice invoice)
