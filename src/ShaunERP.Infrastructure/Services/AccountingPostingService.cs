@@ -58,7 +58,7 @@ public sealed class AccountingPostingService : IAccountingPostingService
         EnsureAccess(Permissions.AccountingVouchersPost);
         var companyId = RequireCompanyId();
         ArgumentNullException.ThrowIfNull(request);
-        if (request.Lines is null || request.Lines.Count < 2)
+        if (request.Lines is null)
             throw new InvalidOperationException("A voucher requires at least two lines.");
 
         NormalizeLines(request.Lines);
@@ -359,11 +359,15 @@ public sealed class AccountingPostingService : IAccountingPostingService
                 throw new InvalidOperationException("Debit and credit amounts cannot be negative.");
             if (line.Debit > 0 && line.Credit > 0)
                 throw new InvalidOperationException("Each line should normally have either Debit or Credit, not both.");
-            if (line.Debit == 0 && line.Credit == 0)
-                throw new InvalidOperationException("Each voucher line must have a debit or credit amount.");
             line.Debit = Math.Round(line.Debit, 2);
             line.Credit = Math.Round(line.Credit, 2);
         }
+
+        // Invoice GST splits and 100% header discounts can emit a rounded-to-zero
+        // line. Drop those so posting stays balanced instead of rejecting the voucher.
+        lines.RemoveAll(l => l.Debit == 0 && l.Credit == 0);
+        if (lines.Count < 2)
+            throw new InvalidOperationException("A voucher requires at least two lines.");
     }
 
     private static void ValidateBalance(List<AccountingPostingLineRequest> lines)

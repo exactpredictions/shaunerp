@@ -748,31 +748,42 @@ public class FinanceService : IFinanceService
                 CustomerId = invoice.CustomerId,
                 ReferenceType = nameof(Invoice),
                 ReferenceId = invoice.Id.ToString()
-            },
-            new()
+            }
+        };
+
+        if (taxable > 0)
+        {
+            lines.Add(new AccountingPostingLineRequest
             {
                 LedgerSystemCode = SystemLedgerCodes.Sales,
                 Credit = taxable,
                 Description = $"Sales {invoice.InvoiceNumber}"
-            }
-        };
+            });
+        }
 
         if (tax > 0)
         {
             var half = Math.Round(tax / 2m, 2);
             var other = tax - half;
-            lines.Add(new AccountingPostingLineRequest
+            if (half > 0)
             {
-                LedgerSystemCode = SystemLedgerCodes.CgstOutput,
-                Credit = half,
-                Description = "Output CGST"
-            });
-            lines.Add(new AccountingPostingLineRequest
+                lines.Add(new AccountingPostingLineRequest
+                {
+                    LedgerSystemCode = SystemLedgerCodes.CgstOutput,
+                    Credit = half,
+                    Description = "Output CGST"
+                });
+            }
+
+            if (other > 0)
             {
-                LedgerSystemCode = SystemLedgerCodes.SgstOutput,
-                Credit = other,
-                Description = "Output SGST"
-            });
+                lines.Add(new AccountingPostingLineRequest
+                {
+                    LedgerSystemCode = SystemLedgerCodes.SgstOutput,
+                    Credit = other,
+                    Description = "Output SGST"
+                });
+            }
         }
 
         var voucher = await _accountingPosting.PostAsync(new AccountingPostingRequest

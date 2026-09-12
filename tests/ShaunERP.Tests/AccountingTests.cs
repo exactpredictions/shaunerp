@@ -133,6 +133,36 @@ public class AccountingTests
     }
 
     [Fact]
+    public async Task Posting_Drops_Rounded_Zero_Lines_And_Keeps_Balance()
+    {
+        var (db, _, posting, accounting, _) = await CreateAsync();
+        await accounting.EnsureBootstrapAsync();
+        var ar = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.AccountsReceivable);
+        var sales = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.Sales);
+        var sgst = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.SgstOutput);
+
+        var voucher = await posting.PostAsync(new AccountingPostingRequest
+        {
+            TransactionDate = DateTime.UtcNow.Date,
+            VoucherTypeCode = SystemVoucherTypeCodes.Sales,
+            Narration = "One-cent tax split",
+            Lines =
+            [
+                new() { LedgerId = ar.Id, Debit = 1.01m },
+                new() { LedgerId = sales.Id, Credit = 1.00m },
+                new() { LedgerId = sgst.Id, Credit = 0.00m },
+                new() { LedgerId = sgst.Id, Credit = 0.01m }
+            ]
+        });
+
+        Assert.Equal(VoucherStatus.Posted, voucher.VoucherStatus);
+        Assert.Equal(1.01m, voucher.TotalDebit);
+        Assert.Equal(1.01m, voucher.TotalCredit);
+        Assert.Equal(3, voucher.Lines.Count);
+        Assert.DoesNotContain(voucher.Lines, l => l.DebitAmount == 0 && l.CreditAmount == 0);
+    }
+
+    [Fact]
     public async Task ProfitAndLoss_And_BalanceSheet_Reflect_Posted_Activity()
     {
         var (db, _, posting, accounting, reports) = await CreateAsync();
