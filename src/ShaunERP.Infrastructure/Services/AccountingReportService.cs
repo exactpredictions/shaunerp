@@ -65,7 +65,8 @@ public sealed class AccountingReportService : IAccountingReportService
             .Include(l => l.Voucher!).ThenInclude(v => v.VoucherType)
             .Where(l => l.CompanyId == companyId
                         && l.LedgerId == ledgerId
-                        && l.Voucher!.VoucherStatus == VoucherStatus.Posted)
+                        && (l.Voucher!.VoucherStatus == VoucherStatus.Posted
+                            || l.Voucher.VoucherStatus == VoucherStatus.Reversed))
             .OrderBy(l => l.Voucher!.VoucherDate).ThenBy(l => l.VoucherId).ThenBy(l => l.SortOrder)
             .ToListAsync(ct);
 
@@ -97,7 +98,9 @@ public sealed class AccountingReportService : IAccountingReportService
         var ledgers = await _db.Ledgers.AsNoTracking().Where(l => l.CompanyId == companyId && l.IsActive).ToListAsync(ct);
         var lines = await _db.AccountingVoucherLines.AsNoTracking()
             .Include(l => l.Voucher)
-            .Where(l => l.CompanyId == companyId && l.Voucher!.VoucherStatus == VoucherStatus.Posted)
+            .Where(l => l.CompanyId == companyId
+                        && (l.Voucher!.VoucherStatus == VoucherStatus.Posted
+                            || l.Voucher.VoucherStatus == VoucherStatus.Reversed))
             .ToListAsync(ct);
 
         var rows = new List<TrialBalanceRow>();
@@ -139,7 +142,8 @@ public sealed class AccountingReportService : IAccountingReportService
             .Include(l => l.Ledger)
             .Include(l => l.Voucher)
             .Where(l => l.CompanyId == companyId
-                        && l.Voucher!.VoucherStatus == VoucherStatus.Posted
+                        && (l.Voucher!.VoucherStatus == VoucherStatus.Posted
+                            || l.Voucher.VoucherStatus == VoucherStatus.Reversed)
                         && l.Voucher.VoucherDate.Date >= fromDate
                         && l.Voucher.VoucherDate.Date <= toDate
                         && (l.Ledger!.AccountType == AccountNature.Income || l.Ledger.AccountType == AccountNature.Expense))
@@ -174,7 +178,8 @@ public sealed class AccountingReportService : IAccountingReportService
         var lines = await _db.AccountingVoucherLines.AsNoTracking()
             .Include(l => l.Voucher)
             .Where(l => l.CompanyId == companyId
-                        && l.Voucher!.VoucherStatus == VoucherStatus.Posted
+                        && (l.Voucher!.VoucherStatus == VoucherStatus.Posted
+                            || l.Voucher.VoucherStatus == VoucherStatus.Reversed)
                         && l.Voucher.VoucherDate.Date <= asOfDate)
             .ToListAsync(ct);
 
@@ -275,7 +280,8 @@ public sealed class AccountingReportService : IAccountingReportService
             .Include(l => l.Ledger)
             .Include(l => l.Voucher!).ThenInclude(v => v.VoucherType)
             .Where(l => l.CompanyId == companyId
-                        && l.Voucher!.VoucherStatus == VoucherStatus.Posted
+                        && (l.Voucher!.VoucherStatus == VoucherStatus.Posted
+                            || l.Voucher.VoucherStatus == VoucherStatus.Reversed)
                         && l.Voucher.VoucherDate.Date >= fromDate
                         && l.Voucher.VoucherDate.Date <= toDate);
         if (ledgerIds is not null)
