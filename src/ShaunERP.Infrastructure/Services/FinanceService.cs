@@ -423,10 +423,11 @@ public class FinanceService : IFinanceService
         if (row is null) return null;
         if (row.Payments.Count > 0)
             throw new InvalidOperationException("Cannot void an invoice with recorded payments.");
-        row.InvoiceStatus = InvoiceStatus.Void;
-        row.IsPaid = false;
-        await _db.SaveChangesAsync(ct);
+        if (row.InvoiceStatus == InvoiceStatus.Void)
+            return row;
 
+        // Reverse the sales voucher first. Persisting Void beforehand left invoices
+        // voided while a closed year or locked period rejected the reversal.
         try
         {
             await ReverseInvoiceAccountingAsync(row, ct);
@@ -434,6 +435,10 @@ public class FinanceService : IFinanceService
         catch (UnauthorizedAccessException)
         {
         }
+
+        row.InvoiceStatus = InvoiceStatus.Void;
+        row.IsPaid = false;
+        await _db.SaveChangesAsync(ct);
 
         return row;
     }

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using ShaunERP.Core.Accounting;
+using ShaunERP.Core.Finance;
 using ShaunERP.Core.Identity;
 using ShaunERP.Core.Platform;
 using ShaunERP.Infrastructure.Persistence;
@@ -91,7 +92,7 @@ public class AccountingTests
     [Fact]
     public async Task Reversal_Creates_Opposite_Entries_And_Duplicate_Source_Is_Idempotent()
     {
-        var (db, _, posting, accounting, _) = await CreateAsync();
+        var (db, _, posting, accounting, reports) = await CreateAsync();
         await accounting.EnsureBootstrapAsync();
         var bank = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.BankDefault);
         var rent = await db.Ledgers.FirstAsync(l => l.LedgerCode == "RENT");
@@ -130,6 +131,59 @@ public class AccountingTests
         Assert.Equal(VoucherStatus.Posted, reversal.VoucherStatus);
         var original = await db.AccountingVouchers.FirstAsync(v => v.Id == first.Id);
         Assert.Equal(VoucherStatus.Reversed, original.VoucherStatus);
+
+        // Original is Reversed (excluded if reports only count Posted) plus an
+        // opposite Posted voucher. Both must stay on the ledger so the rent
+        // payment washes out instead of inverting to a credit balance.
+        var tb = await reports.GetTrialBalanceAsync(null, null);
+        Assert.True(tb.IsBalanced);
+        var rentRow = tb.Rows.SingleOrDefault(r => r.LedgerCode == "RENT");
+        Assert.True(rentRow is null || (rentRow.ClosingDebit == 0 && rentRow.ClosingCredit == 0));
+        var bankRow = tb.Rows.Single(r => r.LedgerCode == SystemLedgerCodes.BankDefault);
+        Assert.Equal(0m, bankRow.ClosingDebit);
+        Assert.Equal(0m, bankRow.ClosingCredit);
+    }
+
+    [Fact]
+    public async Task VoidInvoice_DoesNotPersistVoid_WhenPeriodLockRejectsReversal()
+    {
+        var (db, tenant, posting, accounting, _) = await CreateAsync();
+        await accounting.EnsureBootstrapAsync();
+        tenant.Set(new TenantContextSnapshot
+        {
+            UserId = 1,
+            CompanyId = 1,
+            CompanyName = "Shaun Infomedia OPC Pvt Ltd",
+            Entitlements = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ModuleKeys.Accounting, ModuleKeys.Finance, ModuleKeys.Crm
+            },
+            Permissions = new HashSet<string>(Permissions.AdminDefaults, StringComparer.OrdinalIgnoreCase)
+        });
+
+        var finance = new FinanceService(db, tenant, new ModuleRegistry(), posting, accounting);
+        var invoice = await finance.CreateInvoiceAsync(new Invoice
+        {
+            CustomerName = "Acme",
+            InvoiceDate = DateTime.UtcNow.Date,
+            Lines =
+            [
+                new InvoiceLine { ProductName = "License", Quantity = 1, UnitPrice = 1000 }
+            ]
+        });
+        var sent = await finance.MarkSentAsync(invoice.Id);
+        Assert.NotNull(sent);
+        Assert.Equal(InvoiceStatus.Sent, sent!.InvoiceStatus);
+        Assert.True(sent.AccountingVoucherId is > 0);
+
+        await accounting.SetPeriodLockAsync(DateTime.UtcNow.Date.AddDays(30), "year-end");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => finance.VoidInvoiceAsync(invoice.Id));
+
+        var after = await db.Invoices.AsNoTracking().FirstAsync(i => i.Id == invoice.Id);
+        Assert.Equal(InvoiceStatus.Sent, after.InvoiceStatus);
+        var voucher = await db.AccountingVouchers.FirstAsync(v => v.Id == sent.AccountingVoucherId);
+        Assert.Equal(VoucherStatus.Posted, voucher.VoucherStatus);
     }
 
     [Fact]

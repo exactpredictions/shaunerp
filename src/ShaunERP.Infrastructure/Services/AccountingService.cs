@@ -116,7 +116,8 @@ public sealed class AccountingService : IAccountingService
             .Include(l => l.Ledger)
             .Include(l => l.Voucher)
             .Where(l => l.CompanyId == companyId
-                        && l.Voucher!.VoucherStatus == VoucherStatus.Posted)
+                        && (l.Voucher!.VoucherStatus == VoucherStatus.Posted
+                            || l.Voucher.VoucherStatus == VoucherStatus.Reversed))
             .ToListAsync(ct);
 
         decimal Balance(Func<Ledger, bool> pred)
