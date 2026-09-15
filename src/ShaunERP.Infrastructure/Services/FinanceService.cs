@@ -449,9 +449,10 @@ public class FinanceService : IFinanceService
             throw new InvalidOperationException("Cannot mark a void invoice as paid.");
 
         var remaining = row.BalanceDue;
+        InvoicePayment? settlement = null;
         if (remaining > 0)
         {
-            row.Payments.Add(new InvoicePayment
+            settlement = new InvoicePayment
             {
                 CompanyId = row.CompanyId,
                 Amount = remaining,
@@ -459,13 +460,18 @@ public class FinanceService : IFinanceService
                 Method = "Mark paid",
                 Reference = "Full settlement",
                 CreatedDate = DateTime.UtcNow
-            });
+            };
+            row.Payments.Add(settlement);
             row.AmountPaid = row.GrandTotal > 0 ? row.GrandTotal : row.Amount;
         }
 
         row.InvoiceStatus = InvoiceStatus.Paid;
         row.IsPaid = true;
         await _db.SaveChangesAsync(ct);
+
+        if (settlement is not null)
+            await TryPostPaymentAccountingAsync(row, settlement, ct);
+
         return row;
     }
 
@@ -540,6 +546,7 @@ public class FinanceService : IFinanceService
         RefreshPaymentStatus(row);
 
         await _db.SaveChangesAsync(ct);
+        await TryPostPaymentAccountingAsync(row, entity, ct);
         return (true, null, entity);
     }
 
@@ -555,6 +562,8 @@ public class FinanceService : IFinanceService
             .Include(i => i.Payments)
             .FirstOrDefaultAsync(i => i.Id == payment.InvoiceId, ct);
         if (invoice is null) return false;
+
+        await ReversePaymentAccountingAsync(payment, ct);
 
         _db.InvoicePayments.Remove(payment);
         invoice.Payments.Remove(payment);
@@ -792,6 +801,134 @@ public class FinanceService : IFinanceService
 
         invoice.AccountingVoucherId = voucher.Id;
         await _db.SaveChangesAsync(ct);
+    }
+
+    private async Task TryPostPaymentAccountingAsync(Invoice invoice, InvoicePayment payment, CancellationToken ct)
+    {
+        try
+        {
+            await PostPaymentAccountingAsync(invoice, payment, ct);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Accounting module may be disabled or the caller lacks voucher-post rights.
+        }
+    }
+
+    private async Task PostPaymentAccountingAsync(Invoice invoice, InvoicePayment payment, CancellationToken ct)
+    {
+        if (!_modules.HasEntitlement(_tenant, ModuleKeys.Accounting))
+            return;
+        if (payment.Id <= 0 || payment.Amount <= 0)
+            return;
+
+        // Receipts only clear AR that the sales voucher actually put on the books.
+        if (!await HasPostedSalesVoucherAsync(invoice, ct))
+            return;
+
+        var existing = await _accountingPosting.FindBySourceAsync(
+            AccountingSourceModules.Sales, nameof(InvoicePayment), payment.Id.ToString(), "Primary", ct);
+        if (existing is not null)
+            return;
+
+        await _accounting.EnsureBootstrapAsync(ct);
+
+        int? customerLedgerId = null;
+        if (invoice.CustomerId is > 0)
+        {
+            var customer = await _db.CrmCustomers.FirstOrDefaultAsync(c => c.Id == invoice.CustomerId, ct);
+            if (customer is not null)
+            {
+                var custLedger = await _accounting.EnsureCustomerLedgerAsync(customer, ct);
+                customerLedgerId = custLedger.Id;
+            }
+        }
+
+        var amount = Math.Round(payment.Amount, 2);
+        if (amount <= 0) return;
+
+        var moneyLedgerCode = await ResolveReceiptLedgerCodeAsync(payment.Method, ct);
+        await _accountingPosting.PostAsync(new AccountingPostingRequest
+        {
+            TransactionDate = payment.PaymentDate == default ? DateTime.UtcNow : payment.PaymentDate,
+            VoucherTypeCode = SystemVoucherTypeCodes.Receipt,
+            ReferenceNumber = invoice.InvoiceNumber,
+            ReferenceDate = payment.PaymentDate,
+            Narration = $"Receipt {invoice.InvoiceNumber} / {payment.Method}",
+            SourceModule = AccountingSourceModules.Sales,
+            SourceEntityType = nameof(InvoicePayment),
+            SourceEntityId = payment.Id.ToString(),
+            PostingType = "Primary",
+            PostImmediately = true,
+            Lines =
+            [
+                new AccountingPostingLineRequest
+                {
+                    LedgerSystemCode = moneyLedgerCode,
+                    Debit = amount,
+                    Description = $"Receipt {invoice.InvoiceNumber}"
+                },
+                new AccountingPostingLineRequest
+                {
+                    LedgerId = customerLedgerId,
+                    LedgerSystemCode = customerLedgerId is null ? SystemLedgerCodes.AccountsReceivable : null,
+                    Credit = amount,
+                    Description = $"Receipt {invoice.InvoiceNumber}",
+                    CustomerId = invoice.CustomerId,
+                    ReferenceType = nameof(Invoice),
+                    ReferenceId = invoice.Id.ToString()
+                }
+            ]
+        }, ct);
+    }
+
+    private async Task ReversePaymentAccountingAsync(InvoicePayment payment, CancellationToken ct)
+    {
+        if (!_modules.HasEntitlement(_tenant, ModuleKeys.Accounting))
+            return;
+
+        try
+        {
+            var voucher = await _accountingPosting.FindBySourceAsync(
+                AccountingSourceModules.Sales, nameof(InvoicePayment), payment.Id.ToString(), "Primary", ct);
+            if (voucher is null || voucher.VoucherStatus != VoucherStatus.Posted)
+                return;
+
+            await _accountingPosting.ReverseAsync(voucher.Id, $"Payment on invoice #{payment.InvoiceId} deleted", ct);
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private async Task<bool> HasPostedSalesVoucherAsync(Invoice invoice, CancellationToken ct)
+    {
+        if (invoice.AccountingVoucherId is > 0)
+        {
+            var linked = await _db.AccountingVouchers.AsNoTracking().FirstOrDefaultAsync(
+                v => v.Id == invoice.AccountingVoucherId && v.CompanyId == invoice.CompanyId, ct);
+            if (linked is not null && linked.VoucherStatus == VoucherStatus.Posted)
+                return true;
+        }
+
+        var bySource = await _accountingPosting.FindBySourceAsync(
+            AccountingSourceModules.Sales, nameof(Invoice), invoice.Id.ToString(), "Primary", ct);
+        return bySource is not null && bySource.VoucherStatus == VoucherStatus.Posted;
+    }
+
+    private async Task<string> ResolveReceiptLedgerCodeAsync(string? method, CancellationToken ct)
+    {
+        var settings = await _db.AccountingSettings.AsNoTracking()
+            .FirstOrDefaultAsync(s => s.CompanyId == RequireCompanyId(), ct);
+        var isCash = !string.IsNullOrWhiteSpace(method)
+            && method.Contains("cash", StringComparison.OrdinalIgnoreCase);
+        if (isCash)
+            return string.IsNullOrWhiteSpace(settings?.DefaultCashLedgerCode)
+                ? SystemLedgerCodes.Cash
+                : settings.DefaultCashLedgerCode;
+        return string.IsNullOrWhiteSpace(settings?.DefaultBankLedgerCode)
+            ? SystemLedgerCodes.BankDefault
+            : settings.DefaultBankLedgerCode;
     }
 
     private async Task ReverseInvoiceAccountingAsync(Invoice invoice, CancellationToken ct)
