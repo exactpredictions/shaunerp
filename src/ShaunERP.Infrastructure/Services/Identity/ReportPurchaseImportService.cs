@@ -210,14 +210,11 @@ public sealed class ReportPurchaseImportService : IReportPurchaseImportService
                 else if (match.Confidence == IdentityMatchConfidence.Conflict) report.Conflicts++;
 
                 int? partyId = null;
-                var priorRow = await _db.ImportSourceRows.AsNoTracking()
-                    .Where(r => r.ExternalId == externalId && r.MatchedPartyId != null)
-                    .OrderByDescending(r => r.Id)
-                    .FirstOrDefaultAsync(ct);
+                var priorPartyId = await _parties.FindPriorImportedPartyIdAsync(companyId, externalId, ct);
                 var existingPurchase = await _db.ReportPurchases
                     .FirstOrDefaultAsync(p => p.CompanyId == companyId && p.ExternalReference == externalRef, ct);
 
-                if (priorRow?.MatchedPartyId is int priorParty)
+                if (priorPartyId is int priorParty)
                 {
                     partyId = priorParty;
                     report.ExistingPartiesReused++;

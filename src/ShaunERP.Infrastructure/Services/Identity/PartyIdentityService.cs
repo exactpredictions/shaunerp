@@ -34,6 +34,7 @@ public interface IPartyIdentityService
 {
     Task<EnsurePartyResult> EnsurePersonPartyAsync(EnsurePartyRequest request, CancellationToken ct = default);
     Task AttachContactChannelsAsync(int partyId, string? phone, string? mobile, string? email, string? secondaryEmail, CancellationToken ct = default);
+    Task<int?> FindPriorImportedPartyIdAsync(int companyId, string? externalId, CancellationToken ct = default);
     string BuildDisplayName(string? firstName, string? lastName, string? fallback = null);
 }
 
@@ -65,6 +66,31 @@ public sealed class PartyIdentityService : IPartyIdentityService
         }
 
         return string.IsNullOrWhiteSpace(fallback) ? "Unknown" : fallback.Trim();
+    }
+
+    /// <summary>
+    /// Idempotent import lookup: only reuse a party previously linked for this
+    /// <paramref name="externalId"/> when both the import batch and the party
+    /// belong to <paramref name="companyId"/>.
+    /// </summary>
+    public async Task<int?> FindPriorImportedPartyIdAsync(int companyId, string? externalId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(externalId))
+        {
+            return null;
+        }
+
+        return await (
+            from row in _db.ImportSourceRows.AsNoTracking()
+            join batch in _db.ImportBatches.AsNoTracking() on row.ImportBatchId equals batch.Id
+            join party in _db.Parties.AsNoTracking() on row.MatchedPartyId equals party.Id
+            where row.ExternalId == externalId
+                  && row.MatchedPartyId != null
+                  && batch.CompanyId == companyId
+                  && party.CompanyId == companyId
+            orderby row.Id descending
+            select (int?)party.Id
+        ).FirstOrDefaultAsync(ct);
     }
 
     public async Task<EnsurePartyResult> EnsurePersonPartyAsync(EnsurePartyRequest request, CancellationToken ct = default)
