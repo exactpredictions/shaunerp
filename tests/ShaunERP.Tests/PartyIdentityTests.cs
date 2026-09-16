@@ -282,6 +282,90 @@ public class PartyIdentityTests
     }
 
     [Fact]
+    public async Task Import_idempotency_does_not_reuse_another_tenant_party()
+    {
+        await using var db = CreateDb();
+        var parties = CreateParties(db);
+        var alice = await SeedPartyAsync(db, 1, "Alice", "TenantA", "9876543210", "alice@a.example");
+
+        db.ImportBatches.Add(new ImportBatch
+        {
+            CompanyId = 1,
+            SourceName = "course-registrations",
+            StartedAt = DateTime.UtcNow,
+            BatchStatus = ImportBatchStatuses.Completed,
+            CreatedDate = DateTime.UtcNow,
+            Status = "Active"
+        });
+        await db.SaveChangesAsync();
+        var batch = await db.ImportBatches.SingleAsync();
+        db.ImportSourceRows.Add(new ImportSourceRow
+        {
+            ImportBatchId = batch.Id,
+            SourceRowNumber = 1,
+            ExternalId = "student-row:1",
+            MatchedPartyId = alice.Id,
+            MatchStatus = ImportMatchStatuses.Created,
+            ProcessedAt = DateTime.UtcNow,
+            CreatedDate = DateTime.UtcNow,
+            Status = "Active"
+        });
+        await db.SaveChangesAsync();
+
+        Assert.Null(await parties.FindPriorImportedPartyIdAsync(2, "student-row:1"));
+        Assert.Equal(alice.Id, await parties.FindPriorImportedPartyIdAsync(1, "student-row:1"));
+    }
+
+    [Fact]
+    public async Task Import_idempotency_ignores_row_whose_party_belongs_to_another_company()
+    {
+        await using var db = CreateDb();
+        var parties = CreateParties(db);
+        var foreign = await SeedPartyAsync(db, 1, "Alice", "TenantA", "9876543210", "alice@a.example");
+
+        db.ImportBatches.Add(new ImportBatch
+        {
+            CompanyId = 2,
+            SourceName = "premium",
+            StartedAt = DateTime.UtcNow,
+            BatchStatus = ImportBatchStatuses.Completed,
+            CreatedDate = DateTime.UtcNow,
+            Status = "Active"
+        });
+        await db.SaveChangesAsync();
+        var batch = await db.ImportBatches.SingleAsync();
+        db.ImportSourceRows.Add(new ImportSourceRow
+        {
+            ImportBatchId = batch.Id,
+            SourceRowNumber = 1,
+            ExternalId = "ep-premium:815",
+            MatchedPartyId = foreign.Id,
+            MatchStatus = ImportMatchStatuses.Linked,
+            ProcessedAt = DateTime.UtcNow,
+            CreatedDate = DateTime.UtcNow,
+            Status = "Active"
+        });
+        await db.SaveChangesAsync();
+
+        Assert.Null(await parties.FindPriorImportedPartyIdAsync(2, "ep-premium:815"));
+    }
+
+    [Fact]
+    public void Student_external_id_is_person_keyed_not_row_number()
+    {
+        var alice = StudentImportService.BuildExternalId(1, "alice@example.com", "9876543210", "Alice");
+        var bobSameRow = StudentImportService.BuildExternalId(1, "bob@example.com", "9123456789", "Bob");
+        var aliceRowTwo = StudentImportService.BuildExternalId(2, "alice@example.com", "9876543210", "Alice");
+
+        Assert.Equal("student-email:alice@example.com", alice);
+        Assert.Equal("student-email:bob@example.com", bobSameRow);
+        Assert.Equal(alice, aliceRowTwo);
+        Assert.NotEqual(alice, bobSameRow);
+        Assert.Equal("student-phone:9876543210", StudentImportService.BuildExternalId(3, null, "9876543210", "No Email"));
+        Assert.Equal("student-row:4:nameless student", StudentImportService.BuildExternalId(4, null, null, "Nameless Student"));
+    }
+
+    [Fact]
     public async Task Contact_update_creates_party_and_attaches_channels()
     {
         await using var db = CreateDb();

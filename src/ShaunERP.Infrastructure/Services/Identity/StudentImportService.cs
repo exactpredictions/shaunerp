@@ -173,17 +173,14 @@ public sealed class StudentImportService : IStudentImportService
                 else if (match.Confidence == IdentityMatchConfidence.Conflict) report.Conflicts++;
 
                 int? partyId = null;
-                var externalId = $"student-row:{rowNumber}";
+                var externalId = BuildExternalId(rowNumber, email, phone.NormalizedPhone, row.Name);
 
-                // Idempotency: reuse party already linked for this workbook row.
-                var priorRow = await _db.ImportSourceRows.AsNoTracking()
-                    .Where(r => r.ExternalId == externalId && r.MatchedPartyId != null)
-                    .OrderByDescending(r => r.Id)
-                    .FirstOrDefaultAsync(ct);
+                // Idempotency: reuse party already linked for this person in this company.
+                var priorPartyId = await _parties.FindPriorImportedPartyIdAsync(companyId, externalId, ct);
 
-                if (priorRow?.MatchedPartyId is int priorPartyId)
+                if (priorPartyId is int reusedPartyId)
                 {
-                    partyId = priorPartyId;
+                    partyId = reusedPartyId;
                     report.ExistingPartiesReused++;
                 }
                 else if (options.AnalyzeOnly)
@@ -264,7 +261,7 @@ public sealed class StudentImportService : IStudentImportService
                                 : match.Confidence == IdentityMatchConfidence.HighConfidence
                                     ? ImportMatchStatuses.Linked
                                     : ImportMatchStatuses.Created,
-                            MatchReason = match.Reason ?? (priorRow is not null ? "ReusedPriorSourceRow" : null),
+                            MatchReason = match.Reason ?? (priorPartyId is not null ? "ReusedPriorSourceRow" : null),
                             ProcessedAt = DateTime.UtcNow,
                             CreatedDate = DateTime.UtcNow,
                             Status = "Active"
@@ -429,6 +426,19 @@ public sealed class StudentImportService : IStudentImportService
         }
 
         return rows;
+    }
+
+    /// <summary>
+    /// Stable per-person key so a later workbook cannot reuse row 1's party for a different student.
+    /// </summary>
+    public static string BuildExternalId(int rowNumber, string? normalizedEmail, string? normalizedPhone, string? name)
+    {
+        if (!string.IsNullOrWhiteSpace(normalizedEmail))
+            return $"student-email:{normalizedEmail.Trim()}";
+        if (!string.IsNullOrWhiteSpace(normalizedPhone))
+            return $"student-phone:{normalizedPhone.Trim()}";
+        var fallback = string.IsNullOrWhiteSpace(name) ? "unknown" : name.Trim().ToLowerInvariant();
+        return $"student-row:{rowNumber}:{fallback}";
     }
 
     private static (string? First, string? Last) SplitName(string? full)

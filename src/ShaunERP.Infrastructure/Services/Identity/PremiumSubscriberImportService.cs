@@ -230,14 +230,11 @@ public sealed class PremiumSubscriberImportService : IPremiumSubscriberImportSer
                 int? partyId = null;
 
                 // Idempotency: prior source row or existing membership by legacy user id
-                var priorRow = await _db.ImportSourceRows.AsNoTracking()
-                    .Where(r => r.ExternalId == externalId && r.MatchedPartyId != null)
-                    .OrderByDescending(r => r.Id)
-                    .FirstOrDefaultAsync(ct);
+                var priorPartyId = await _parties.FindPriorImportedPartyIdAsync(companyId, externalId, ct);
                 var existingMembership = await _db.SubscriptionMemberships
                     .FirstOrDefaultAsync(m => m.CompanyId == companyId && m.ExternalReference == externalRef, ct);
 
-                if (priorRow?.MatchedPartyId is int priorParty)
+                if (priorPartyId is int priorParty)
                 {
                     partyId = priorParty;
                     stats.ExistingPartiesReused++;
