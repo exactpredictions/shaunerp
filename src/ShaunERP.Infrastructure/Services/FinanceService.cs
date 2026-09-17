@@ -647,9 +647,10 @@ public class FinanceService : IFinanceService
 
         invoice.Subtotal = Math.Round(
             invoice.Lines.Sum(l => InvoiceLine.LineNetAmount(l.Quantity, l.UnitPrice, l.Discount)), 2);
-        invoice.TaxTotal = Math.Round(invoice.Lines.Sum(l => l.TaxAmount), 2);
-        invoice.Discount = Math.Max(0, invoice.Discount);
-        var afterDiscount = Math.Max(0, invoice.Subtotal - invoice.Discount);
+        invoice.Discount = Math.Min(Math.Max(0, invoice.Discount), invoice.Subtotal);
+        var lineTax = Math.Round(invoice.Lines.Sum(l => l.TaxAmount), 2);
+        invoice.TaxTotal = Invoice.ScaleTaxForDocumentDiscount(invoice.Subtotal, invoice.Discount, lineTax);
+        var afterDiscount = invoice.Subtotal - invoice.Discount;
         invoice.GrandTotal = Math.Round(afterDiscount + invoice.TaxTotal, 2);
         invoice.Amount = invoice.GrandTotal;
         invoice.AmountPaid = invoice.Payments?.Sum(p => p.Amount) ?? invoice.AmountPaid;

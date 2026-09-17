@@ -529,7 +529,9 @@ public sealed class SalesOrderService : ISalesOrderService
         var lineNet = order.Lines.Sum(l => Math.Max(0, l.Quantity * l.UnitPrice * (1m - Math.Clamp(l.Discount, 0, 100) / 100m)));
         order.Subtotal = Math.Round(lineNet, 2, MidpointRounding.AwayFromZero);
         order.Discount = Math.Min(Math.Max(0, order.Discount), order.Subtotal);
-        order.TaxTotal = Math.Round(order.Lines.Sum(l => l.TaxAmount), 2, MidpointRounding.AwayFromZero);
+        var lineTax = Math.Round(order.Lines.Sum(l => l.TaxAmount), 2, MidpointRounding.AwayFromZero);
+        order.TaxTotal = Invoice.ScaleTaxForDocumentDiscount(
+            order.Subtotal, order.Discount, lineTax, MidpointRounding.AwayFromZero);
         order.GrandTotal = Math.Round(order.Subtotal - order.Discount + order.TaxTotal, 2, MidpointRounding.AwayFromZero);
     }
 

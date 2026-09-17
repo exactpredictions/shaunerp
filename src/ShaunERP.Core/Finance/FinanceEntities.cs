@@ -113,7 +113,7 @@ public class Invoice : BaseEntity
     public string? Terms { get; set; }
 
     public decimal Subtotal { get; set; }
-    /// <summary>Document-level discount amount (absolute), applied after line subtotals.</summary>
+    /// <summary>Document-level discount amount (absolute), applied after line subtotals and before tax.</summary>
     public decimal Discount { get; set; }
     public decimal TaxTotal { get; set; }
     public decimal GrandTotal { get; set; }
@@ -144,6 +144,20 @@ public class Invoice : BaseEntity
 
     public ICollection<InvoiceLine> Lines { get; set; } = new List<InvoiceLine>();
     public ICollection<InvoicePayment> Payments { get; set; } = new List<InvoicePayment>();
+
+    /// <summary>
+    /// Tax is assessed on the amount remaining after the header discount.
+    /// <paramref name="lineTax"/> is the sum of line tax computed on undiscounted nets;
+    /// scale it by the remaining taxable share so GST/output tax matches taxable sales.
+    /// </summary>
+    public static decimal ScaleTaxForDocumentDiscount(
+        decimal subtotal, decimal discount, decimal lineTax,
+        MidpointRounding rounding = MidpointRounding.ToEven)
+    {
+        var after = Math.Max(0, subtotal - Math.Max(0, discount));
+        if (subtotal <= 0m) return 0m;
+        return Math.Round(lineTax * after / subtotal, 2, rounding);
+    }
 }
 
 public class InvoiceLine : BaseEntity

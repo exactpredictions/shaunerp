@@ -572,12 +572,14 @@
     {
         if (_model.Discount < 0) _model.Discount = 0;
         _liveSubtotal = Math.Round(_lines.Sum(l => InvoiceLine.LineNetAmount(l.Quantity, l.UnitPrice, l.Discount)), 2);
-        _liveTax = Math.Round(_lines.Sum(l =>
+        if (_model.Discount > _liveSubtotal) _model.Discount = _liveSubtotal;
+        var lineTax = Math.Round(_lines.Sum(l =>
         {
             var net = InvoiceLine.LineNetAmount(l.Quantity, l.UnitPrice, l.Discount);
             return Math.Round(net * (Math.Clamp(l.TaxRate, 0, 100) / 100m), 2);
         }), 2);
         var afterDisc = Math.Max(0, _liveSubtotal - Math.Max(0, _model.Discount));
+        _liveTax = Invoice.ScaleTaxForDocumentDiscount(_liveSubtotal, _model.Discount, lineTax);
         _liveGrand = Math.Round(afterDisc + _liveTax, 2);
         _totalsVersion++;
     }
