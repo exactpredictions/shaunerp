@@ -2,6 +2,7 @@
 @page "/orders/{Id:int}"
 @attribute [Authorize]
 @using System.Globalization
+@using ShaunERP.Core.Finance
 @using ShaunERP.Core.Sales
 @inject ISalesOrderService Orders
 @inject IProjectManagementService ProjectManagement
@@ -438,7 +439,8 @@
         _liveSubtotal = Math.Round(_lines.Sum(l => LineNet(l)), 2, MidpointRounding.AwayFromZero);
         var disc = Math.Min(Math.Max(0, _model.Discount), _liveSubtotal);
         _model.Discount = disc;
-        _liveTax = Math.Round(_lines.Sum(l => l.TaxAmount), 2, MidpointRounding.AwayFromZero);
+        var lineTax = Math.Round(_lines.Sum(l => l.TaxAmount), 2, MidpointRounding.AwayFromZero);
+        _liveTax = Invoice.ScaleTaxForDocumentDiscount(_liveSubtotal, disc, lineTax, MidpointRounding.AwayFromZero);
         _liveGrand = Math.Round(_liveSubtotal - disc + _liveTax, 2, MidpointRounding.AwayFromZero);
         _totalsVersion++;
     }
