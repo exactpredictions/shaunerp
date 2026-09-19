@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using ShaunERP.Core.Accounting;
 using ShaunERP.Core.Finance;
@@ -194,12 +195,14 @@ public sealed class PaymentsCsvImporter : EntityCsvImporterBase
         var invoices = await _db.Invoices.AsNoTracking()
             .Where(i => i.CompanyId == companyId)
             .ToDictionaryAsync(i => i.InvoiceNumber, i => i.Id, StringComparer.OrdinalIgnoreCase, ct);
+        var seenKeys = await LoadExistingPaymentKeysAsync(companyId, ct);
         var rows = new List<CsvRowValidation>();
         var n = 1;
         foreach (var values in parsed.Rows)
         {
             n++;
             var errors = new List<string>();
+            var warnings = new List<string>();
             var number = CsvValidator.Get(values, "InvoiceNumber");
             if (!CsvValidator.TryRequired(number, "InvoiceNumber", out var e1)) errors.Add(e1!);
             if (!string.IsNullOrWhiteSpace(number) && !invoices.ContainsKey(number))
@@ -210,13 +213,29 @@ public sealed class PaymentsCsvImporter : EntityCsvImporterBase
             if (!CsvValidator.TryRequired(CsvValidator.Get(values, "Amount"), "Amount", out var e2)) errors.Add(e2!);
             if (!CsvValidator.TryDecimal(CsvValidator.Get(values, "Amount"), out var amt, out var e3) && e3 is not null) errors.Add(e3);
             if (amt is <= 0) errors.Add("Amount must be greater than zero.");
-            if (!CsvValidator.TryDate(CsvValidator.Get(values, "PaymentDate"), out _, out var e4) && e4 is not null) errors.Add(e4);
+            if (!CsvValidator.TryDate(CsvValidator.Get(values, "PaymentDate"), out var payDate, out var e4) && e4 is not null) errors.Add(e4);
+
+            int? invoiceId = !string.IsNullOrWhiteSpace(number) && invoices.TryGetValue(number, out var iid) ? iid : null;
+            var action = "Create";
+            if (errors.Count == 0 && invoiceId is int matchedId && amt is decimal amount)
+            {
+                var key = PaymentKey(
+                    matchedId,
+                    amount,
+                    payDate ?? DateTime.UtcNow.Date,
+                    Null(CsvValidator.Get(values, "Reference")));
+                if (!seenKeys.Add(key))
+                {
+                    action = "Skip";
+                    warnings.Add("Matching payment already exists; will not record again.");
+                }
+            }
 
             rows.Add(new CsvRowValidation
             {
-                RowNumber = n, IsValid = errors.Count == 0, Action = "Create", Values = values,
-                Errors = errors, MatchKey = number,
-                ExistingId = !string.IsNullOrWhiteSpace(number) && invoices.TryGetValue(number, out var iid) ? iid : null
+                RowNumber = n, IsValid = errors.Count == 0, Action = action, Values = values,
+                Errors = errors, Warnings = warnings, MatchKey = number,
+                ExistingId = invoiceId
             });
         }
 
@@ -225,27 +244,49 @@ public sealed class PaymentsCsvImporter : EntityCsvImporterBase
 
     public override async Task<CsvImportResult> ApplyAsync(CsvImportPreview preview, int companyId, CancellationToken ct = default)
     {
-        var created = 0; var failed = 0;
+        var created = 0; var failed = 0; var skipped = preview.InvalidCount;
         var messages = new List<string>();
+        var createdIds = new List<int>();
+        var seenKeys = await LoadExistingPaymentKeysAsync(companyId, ct);
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
         try
         {
             foreach (var row in preview.Rows.Where(r => r.IsValid))
             {
+                if (row.Action.Equals("Skip", StringComparison.OrdinalIgnoreCase))
+                {
+                    skipped++;
+                    continue;
+                }
+
                 CsvValidator.TryDecimal(CsvValidator.Get(row.Values, "Amount"), out var amount, out _);
                 CsvValidator.TryDate(CsvValidator.Get(row.Values, "PaymentDate"), out var date, out _);
-                var (ok, error, _) = await _finance.RecordPaymentAsync(
-                    row.ExistingId!.Value,
+                var invoiceId = row.ExistingId!.Value;
+                var paymentDate = date ?? DateTime.UtcNow.Date;
+                var reference = Null(CsvValidator.Get(row.Values, "Reference"));
+                var key = PaymentKey(invoiceId, amount ?? 0, paymentDate, reference);
+                if (!seenKeys.Add(key))
+                {
+                    skipped++;
+                    continue;
+                }
+
+                var (ok, error, payment) = await _finance.RecordPaymentAsync(
+                    invoiceId,
                     new InvoicePayment
                     {
                         Amount = amount ?? 0,
-                        PaymentDate = date ?? DateTime.UtcNow.Date,
+                        PaymentDate = paymentDate,
                         Method = Null(CsvValidator.Get(row.Values, "Method")) ?? "Bank transfer",
-                        Reference = Null(CsvValidator.Get(row.Values, "Reference")),
+                        Reference = reference,
                         Notes = Null(CsvValidator.Get(row.Values, "Notes"))
                     },
                     ct);
-                if (ok) created++;
+                if (ok && payment is not null)
+                {
+                    created++;
+                    createdIds.Add(payment.Id);
+                }
                 else
                 {
                     failed++;
@@ -253,16 +294,28 @@ public sealed class PaymentsCsvImporter : EntityCsvImporterBase
                 }
             }
 
+            if (failed > 0)
+            {
+                await UndoCreatedPaymentsAsync(createdIds, ct);
+                await tx.CommitAsync(ct);
+                return new CsvImportResult
+                {
+                    EntityKey = EntityKey, Success = false, Created = 0, Failed = failed,
+                    Skipped = skipped, Messages = messages
+                };
+            }
+
             await tx.CommitAsync(ct);
             return new CsvImportResult
             {
-                EntityKey = EntityKey, Success = failed == 0, Created = created, Failed = failed,
-                Skipped = preview.InvalidCount, Messages = messages
+                EntityKey = EntityKey, Success = true, Created = created, Failed = 0,
+                Skipped = skipped, Messages = messages
             };
         }
         catch (Exception ex)
         {
-            await tx.RollbackAsync(ct);
+            await UndoCreatedPaymentsAsync(createdIds, ct);
+            try { await tx.RollbackAsync(ct); } catch { /* InMemory / already completed */ }
             return new CsvImportResult { EntityKey = EntityKey, Success = false, Messages = [ex.Message] };
         }
     }
@@ -287,6 +340,26 @@ public sealed class PaymentsCsvImporter : EntityCsvImporterBase
             ["InvoiceNumber"] = "SAMPLE-INV-001", ["Amount"] = "500.00", ["PaymentDate"] = "2026-04-10",
             ["Method"] = "Bank transfer", ["Reference"] = "SAMPLE-UTR-001", ["Notes"] = "SAMPLE payment"
         });
+
+    private async Task<HashSet<string>> LoadExistingPaymentKeysAsync(int companyId, CancellationToken ct)
+    {
+        var existing = await _db.InvoicePayments.AsNoTracking()
+            .Where(p => p.CompanyId == companyId)
+            .Select(p => new { p.InvoiceId, p.Amount, p.PaymentDate, p.Reference })
+            .ToListAsync(ct);
+        return existing
+            .Select(p => PaymentKey(p.InvoiceId, p.Amount, p.PaymentDate, p.Reference))
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    private async Task UndoCreatedPaymentsAsync(IReadOnlyList<int> paymentIds, CancellationToken ct)
+    {
+        foreach (var id in paymentIds)
+            await _finance.DeletePaymentAsync(id, ct);
+    }
+
+    private static string PaymentKey(int invoiceId, decimal amount, DateTime date, string? reference)
+        => $"{invoiceId}|{amount.ToString("0.00", CultureInfo.InvariantCulture)}|{date:yyyy-MM-dd}|{(reference ?? string.Empty).Trim()}";
 
     private static string? Null(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim();
 }
