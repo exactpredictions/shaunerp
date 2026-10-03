@@ -195,13 +195,17 @@ public class FinanceService : IFinanceService
     public async Task<IReadOnlyList<Invoice>> ListInvoicesAsync(CancellationToken ct = default)
     {
         EnsureFinanceAccess(Permissions.FinanceInvoicesView);
-        return await TenantInvoices(_db.Invoices.AsNoTracking())
+        var companyId = RequireCompanyId();
+        var invoices = await TenantInvoices(_db.Invoices.AsNoTracking())
             .Include(i => i.Customer)
             .Include(i => i.Lines)
             .Include(i => i.Payments)
             .OrderByDescending(i => i.Id)
             .Take(500)
             .ToListAsync(ct);
+        foreach (var invoice in invoices)
+            StripForeignCustomer(invoice, companyId);
+        return invoices;
     }
 
     public async Task<PagedResult<Invoice>> QueryInvoicesAsync(ListQuery? query = null, CancellationToken ct = default)
@@ -222,17 +226,24 @@ public class FinanceService : IFinanceService
                 (i.Customer != null && i.Customer.CompanyName != null && EF.Functions.ILike(i.Customer.CompanyName, pattern)));
         }
 
-        return await q.OrderByDescending(i => i.Id).ToPagedResultAsync(query, ct);
+        var page = await q.OrderByDescending(i => i.Id).ToPagedResultAsync(query, ct);
+        var companyId = RequireCompanyId();
+        foreach (var invoice in page.Items)
+            StripForeignCustomer(invoice, companyId);
+        return page;
     }
 
     public async Task<Invoice?> GetInvoiceAsync(int id, CancellationToken ct = default)
     {
         EnsureFinanceAccess(Permissions.FinanceInvoicesView);
-        return await TenantInvoices(_db.Invoices.AsNoTracking())
+        var invoice = await TenantInvoices(_db.Invoices.AsNoTracking())
             .Include(i => i.Customer)
             .Include(i => i.Lines)
             .Include(i => i.Payments)
             .FirstOrDefaultAsync(i => i.Id == id, ct);
+        if (invoice is not null)
+            StripForeignCustomer(invoice, RequireCompanyId());
+        return invoice;
     }
 
     public async Task<Invoice> CreateInvoiceAsync(Invoice invoice, CancellationToken ct = default)
@@ -266,6 +277,7 @@ public class FinanceService : IFinanceService
         invoice.Discount = Math.Max(0, invoice.Discount);
 
         await ResolveCustomerNameAsync(invoice, ct);
+        await ResolveSalesOrderAsync(invoice, ct);
         ValidateInvoice(invoice);
 
         if (string.IsNullOrWhiteSpace(invoice.InvoiceNumber))
@@ -568,11 +580,16 @@ public class FinanceService : IFinanceService
     {
         if (invoice.CustomerId is int customerId)
         {
-            var companyId = RequireCompanyId();
-            var customer = await _db.CrmCustomers.AsNoTracking()
-                .FirstOrDefaultAsync(c => c.Id == customerId && c.CompanyId == companyId, ct);
-            if (customer is not null)
+            if (customerId <= 0)
             {
+                invoice.CustomerId = null;
+            }
+            else
+            {
+                var companyId = RequireCompanyId();
+                var customer = await _db.CrmCustomers.AsNoTracking()
+                    .FirstOrDefaultAsync(c => c.Id == customerId && c.CompanyId == companyId, ct)
+                    ?? throw new InvalidOperationException("Customer not found for this account.");
                 invoice.CustomerName = customer.CompanyName;
                 if (string.IsNullOrWhiteSpace(invoice.PaymentTerms))
                     invoice.PaymentTerms = customer.PaymentTerms;
@@ -582,11 +599,39 @@ public class FinanceService : IFinanceService
                     invoice.Salesperson = customer.CustomerOwner;
             }
         }
-        else if (string.IsNullOrWhiteSpace(invoice.CustomerName) && invoice.FinanceCustomerId is int fcId)
+        else if (invoice.FinanceCustomerId is int fcId && fcId > 0)
         {
-            var fc = await _db.FinanceCustomers.AsNoTracking().FirstOrDefaultAsync(c => c.Id == fcId, ct);
-            if (fc is not null) invoice.CustomerName = fc.Name;
+            var companyId = RequireCompanyId();
+            var fc = await _db.FinanceCustomers.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Id == fcId
+                    && _db.CompanyMasters.Any(b => b.Id == c.CompanyMasterId && b.TenantCompanyId == companyId), ct)
+                ?? throw new InvalidOperationException("Customer not found for this account.");
+            if (string.IsNullOrWhiteSpace(invoice.CustomerName))
+                invoice.CustomerName = fc.Name;
         }
+    }
+
+    private async Task ResolveSalesOrderAsync(Invoice invoice, CancellationToken ct)
+    {
+        if (invoice.SalesOrderId is not int salesOrderId)
+            return;
+        if (salesOrderId <= 0)
+        {
+            invoice.SalesOrderId = null;
+            return;
+        }
+
+        var companyId = RequireCompanyId();
+        var exists = await _db.SalesOrders.AsNoTracking()
+            .AnyAsync(o => o.Id == salesOrderId && o.CompanyId == companyId, ct);
+        if (!exists)
+            throw new InvalidOperationException("Sales order not found for this account.");
+    }
+
+    private static void StripForeignCustomer(Invoice invoice, int companyId)
+    {
+        if (invoice.Customer is not null && invoice.Customer.CompanyId != companyId)
+            invoice.Customer = null;
     }
 
     private async Task<string> NextInvoiceNumberAsync(CompanyMaster book, CancellationToken ct)
@@ -722,7 +767,8 @@ public class FinanceService : IFinanceService
         int? customerLedgerId = null;
         if (invoice.CustomerId is > 0)
         {
-            var customer = await _db.CrmCustomers.FirstOrDefaultAsync(c => c.Id == invoice.CustomerId, ct);
+            var customer = await _db.CrmCustomers.FirstOrDefaultAsync(
+                c => c.Id == invoice.CustomerId && c.CompanyId == invoice.CompanyId, ct);
             if (customer is not null)
             {
                 var custLedger = await _accounting.EnsureCustomerLedgerAsync(customer, ct);
