@@ -36,9 +36,7 @@ public sealed class InvoicesCsvImporter : EntityCsvImporterBase
 
     public override async Task<CsvImportPreview> PreviewAsync(CsvParseResult parsed, int companyId, CancellationToken ct = default)
     {
-        var existing = await _db.Invoices.AsNoTracking()
-            .Where(i => i.CompanyId == companyId)
-            .ToDictionaryAsync(i => i.InvoiceNumber, i => i.Id, StringComparer.OrdinalIgnoreCase, ct);
+        var existing = await InvoiceNumberLookup.LoadInvoiceNumbersAsync(_db, companyId, ct);
         var customers = await _db.CrmCustomers.AsNoTracking()
             .Where(c => c.CompanyId == companyId && c.AccountNumber != null)
             .ToDictionaryAsync(c => c.AccountNumber!, c => c, StringComparer.OrdinalIgnoreCase, ct);
@@ -65,7 +63,11 @@ public sealed class InvoicesCsvImporter : EntityCsvImporterBase
 
             int? id = null;
             var action = "Create";
-            if (!string.IsNullOrWhiteSpace(number) && existing.TryGetValue(number, out var eid))
+            if (!string.IsNullOrWhiteSpace(number) && existing.Duplicates.Contains(number))
+            {
+                errors.Add($"Invoice '{number}' is duplicated; resolve the clash before importing.");
+            }
+            else if (!string.IsNullOrWhiteSpace(number) && existing.IdsByNumber.TryGetValue(number, out var eid))
             {
                 id = eid;
                 action = "Update";
@@ -191,9 +193,7 @@ public sealed class PaymentsCsvImporter : EntityCsvImporterBase
 
     public override async Task<CsvImportPreview> PreviewAsync(CsvParseResult parsed, int companyId, CancellationToken ct = default)
     {
-        var invoices = await _db.Invoices.AsNoTracking()
-            .Where(i => i.CompanyId == companyId)
-            .ToDictionaryAsync(i => i.InvoiceNumber, i => i.Id, StringComparer.OrdinalIgnoreCase, ct);
+        var invoices = await InvoiceNumberLookup.LoadInvoiceNumbersAsync(_db, companyId, ct);
         var rows = new List<CsvRowValidation>();
         var n = 1;
         foreach (var values in parsed.Rows)
@@ -202,7 +202,11 @@ public sealed class PaymentsCsvImporter : EntityCsvImporterBase
             var errors = new List<string>();
             var number = CsvValidator.Get(values, "InvoiceNumber");
             if (!CsvValidator.TryRequired(number, "InvoiceNumber", out var e1)) errors.Add(e1!);
-            if (!string.IsNullOrWhiteSpace(number) && !invoices.ContainsKey(number))
+            if (!string.IsNullOrWhiteSpace(number) && invoices.Duplicates.Contains(number))
+            {
+                errors.Add($"Invoice '{number}' is duplicated; payments cannot be imported until numbers are unique.");
+            }
+            else if (!string.IsNullOrWhiteSpace(number) && !invoices.IdsByNumber.ContainsKey(number))
             {
                 errors.Add($"Invoice '{number}' not found.");
             }
@@ -216,7 +220,7 @@ public sealed class PaymentsCsvImporter : EntityCsvImporterBase
             {
                 RowNumber = n, IsValid = errors.Count == 0, Action = "Create", Values = values,
                 Errors = errors, MatchKey = number,
-                ExistingId = !string.IsNullOrWhiteSpace(number) && invoices.TryGetValue(number, out var iid) ? iid : null
+                ExistingId = !string.IsNullOrWhiteSpace(number) && invoices.IdsByNumber.TryGetValue(number, out var iid) ? iid : null
             });
         }
 
@@ -684,4 +688,23 @@ public sealed class OpeningBalancesCsvImporter : EntityCsvImporterBase
         {
             ["LedgerCode"] = "SAMPLE-LED-002", ["OpeningBalance"] = "5000.00", ["OpeningBalanceType"] = "Debit"
         });
+}
+
+file static class InvoiceNumberLookup
+{
+    public static async Task<(
+        Dictionary<string, int> IdsByNumber,
+        HashSet<string> Duplicates)> LoadInvoiceNumbersAsync(
+        ShaunErpDbContext db, int companyId, CancellationToken ct)
+    {
+        var rows = await db.Invoices.AsNoTracking()
+            .Where(i => i.CompanyId == companyId)
+            .Select(i => new { i.InvoiceNumber, i.Id })
+            .ToListAsync(ct);
+
+        var groups = rows.GroupBy(i => i.InvoiceNumber, StringComparer.OrdinalIgnoreCase).ToList();
+        return (
+            groups.ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase),
+            groups.Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet(StringComparer.OrdinalIgnoreCase));
+    }
 }
