@@ -272,6 +272,7 @@ public class FinanceService : IFinanceService
             invoice.InvoiceNumber = await NextInvoiceNumberAsync(book, ct);
         else
             invoice.InvoiceNumber = invoice.InvoiceNumber.Trim();
+        await EnsureUniqueInvoiceNumberAsync(invoice.InvoiceNumber, exceptInvoiceId: null, ct);
 
         foreach (var line in invoice.Lines)
         {
@@ -317,7 +318,10 @@ public class FinanceService : IFinanceService
 
         // Number is locked once issued (non-draft)
         if (row.InvoiceStatus == InvoiceStatus.Draft && !string.IsNullOrWhiteSpace(update.InvoiceNumber))
+        {
             row.InvoiceNumber = update.InvoiceNumber.Trim();
+            await EnsureUniqueInvoiceNumberAsync(row.InvoiceNumber, row.Id, ct);
+        }
         row.InvoiceDate = NormalizeUtc(update.InvoiceDate) ?? row.InvoiceDate;
         row.DueDate = NormalizeUtc(update.DueDate);
         row.CurrencyCode = update.CurrencyCode;
@@ -391,6 +395,10 @@ public class FinanceService : IFinanceService
         {
             var book = await GetOrCreateBillingBookAsync(ct);
             row.InvoiceNumber = await NextInvoiceNumberAsync(book, ct);
+        }
+        else
+        {
+            await EnsureUniqueInvoiceNumberAsync(row.InvoiceNumber, row.Id, ct);
         }
 
         if (row.InvoiceStatus == InvoiceStatus.Draft)
@@ -591,12 +599,35 @@ public class FinanceService : IFinanceService
 
     private async Task<string> NextInvoiceNumberAsync(CompanyMaster book, CancellationToken ct)
     {
-        // Reload tracked book for sequence bump
+        // Reload tracked book for sequence bump. Skip numbers already used
+        // (manual entry or a sequence that was rewound by billing-book settings).
         var tracked = await _db.CompanyMasters.FirstAsync(b => b.Id == book.Id, ct);
-        var number = $"{tracked.InvoiceNumberPrefix}{tracked.NextInvoiceSequence:D4}";
-        tracked.NextInvoiceSequence++;
-        await _db.SaveChangesAsync(ct);
-        return number;
+        for (var attempt = 0; attempt < 10_000; attempt++)
+        {
+            var number = $"{tracked.InvoiceNumberPrefix}{tracked.NextInvoiceSequence:D4}";
+            tracked.NextInvoiceSequence++;
+            if (!await InvoiceNumberTakenAsync(number, exceptInvoiceId: null, ct))
+            {
+                await _db.SaveChangesAsync(ct);
+                return number;
+            }
+        }
+
+        throw new InvalidOperationException("Could not allocate a unique invoice number.");
+    }
+
+    private async Task EnsureUniqueInvoiceNumberAsync(string invoiceNumber, int? exceptInvoiceId, CancellationToken ct)
+    {
+        if (await InvoiceNumberTakenAsync(invoiceNumber, exceptInvoiceId, ct))
+            throw new InvalidOperationException($"Invoice number '{invoiceNumber.Trim()}' is already used.");
+    }
+
+    private async Task<bool> InvoiceNumberTakenAsync(string invoiceNumber, int? exceptInvoiceId, CancellationToken ct)
+    {
+        var normalized = invoiceNumber.Trim().ToLower();
+        var exceptId = exceptInvoiceId ?? 0;
+        return await TenantInvoices(_db.Invoices)
+            .AnyAsync(i => i.Id != exceptId && i.InvoiceNumber.ToLower() == normalized, ct);
     }
 
     private static void ValidateInvoice(Invoice invoice)
