@@ -757,6 +757,16 @@ public sealed class AccountingService : IAccountingService
         var fy = await GetCurrentFinancialYearAsync(ct)
                  ?? throw new InvalidOperationException("Create a current financial year first.");
 
+        var existing = await _posting.FindBySourceAsync(
+            AccountingSourceModules.Opening,
+            "FinancialYear",
+            fy.Id.ToString(),
+            "Opening",
+            ct);
+        if (existing is not null)
+            throw new InvalidOperationException(
+                "Opening balances have already been posted for this financial year. Reverse the existing opening voucher before posting again.");
+
         var working = lines.Select(l => new AccountingPostingLineRequest
         {
             LedgerId = l.LedgerId,

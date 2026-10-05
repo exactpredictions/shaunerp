@@ -180,6 +180,40 @@ public class AccountingTests
         Assert.True(bs.IsBalanced);
     }
 
+    [Fact]
+    public async Task Second_opening_balance_post_for_same_year_is_rejected()
+    {
+        var (db, _, _, accounting, reports) = await CreateAsync();
+        await accounting.EnsureBootstrapAsync();
+
+        var cash = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.Cash);
+        var bank = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.BankDefault);
+        var capital = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.Capital);
+
+        var first = await accounting.CreateOpeningBalancesAsync(
+        [
+            new() { LedgerId = cash.Id, Debit = 50_000 },
+            new() { LedgerId = capital.Id, Credit = 50_000 }
+        ]);
+        Assert.Equal(VoucherStatus.Posted, first.VoucherStatus);
+        Assert.Equal(50_000m, first.TotalDebit);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => accounting.CreateOpeningBalancesAsync(
+        [
+            new() { LedgerId = bank.Id, Debit = 100_000 },
+            new() { LedgerId = capital.Id, Credit = 100_000 }
+        ]));
+        Assert.Contains("already been posted", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Equal(1, await db.AccountingVouchers.CountAsync(v => v.VoucherStatus == VoucherStatus.Posted));
+        Assert.False(await db.AccountingVoucherLines.AnyAsync(l => l.LedgerId == bank.Id));
+
+        var gl = await reports.GetGeneralLedgerAsync(bank.Id, null, null);
+        Assert.Equal(0m, gl.OpeningBalance);
+        Assert.Equal(0m, gl.ClosingBalance);
+        Assert.Empty(gl.Lines);
+    }
+
     private static async Task<(ShaunErpDbContext db, TenantContext tenant, AccountingPostingService posting, AccountingService accounting, AccountingReportService reports)> CreateAsync()
     {
         var options = new DbContextOptionsBuilder<ShaunErpDbContext>()
