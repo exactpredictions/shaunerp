@@ -180,6 +180,50 @@ public class AccountingTests
         Assert.True(bs.IsBalanced);
     }
 
+    [Fact]
+    public async Task BalanceSheet_Keeps_PriorYear_Profit_So_The_Sheet_Still_Balances()
+    {
+        var (db, _, posting, accounting, reports) = await CreateAsync();
+        await accounting.EnsureBootstrapAsync();
+
+        db.FinancialYears.Add(new FinancialYear
+        {
+            CompanyId = 1,
+            Name = "2025-2026",
+            StartDate = new DateTime(2025, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+            EndDate = new DateTime(2026, 3, 31, 0, 0, 0, DateTimeKind.Utc),
+            IsCurrent = false,
+            CreatedDate = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var bank = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.BankDefault);
+        var sales = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.Sales);
+
+        await posting.PostAsync(new AccountingPostingRequest
+        {
+            TransactionDate = new DateTime(2025, 6, 15, 0, 0, 0, DateTimeKind.Utc),
+            VoucherTypeCode = SystemVoucherTypeCodes.Journal,
+            Lines =
+            [
+                new() { LedgerId = bank.Id, Debit = 50000 },
+                new() { LedgerId = sales.Id, Credit = 50000 }
+            ]
+        });
+
+        var priorYear = await db.FinancialYears.FirstAsync(y => y.Name == "2025-2026");
+        await accounting.CloseFinancialYearAsync(priorYear.Id);
+
+        // Default P&L window starts 1 Apr of the current calendar year, so June 2025
+        // sales are excluded from "current year" while bank still holds the cash.
+        var asOf = new DateTime(2026, 10, 6, 0, 0, 0, DateTimeKind.Utc);
+        var bs = await reports.GetBalanceSheetAsync(asOf);
+        Assert.True(bs.IsBalanced);
+        Assert.Contains(bs.Equity, r => r.Label == "Prior period profit / loss" && r.Amount == 50000m);
+        Assert.DoesNotContain(bs.Equity, r => r.Label == "Current Year Profit / Loss");
+        Assert.Equal(50000m, bs.TotalAssets);
+    }
+
     private static async Task<(ShaunErpDbContext db, TenantContext tenant, AccountingPostingService posting, AccountingService accounting, AccountingReportService reports)> CreateAsync()
     {
         var options = new DbContextOptionsBuilder<ShaunErpDbContext>()
