@@ -173,6 +173,7 @@ public sealed class AccountingReportService : IAccountingReportService
         var ledgers = await _db.Ledgers.AsNoTracking().Where(l => l.CompanyId == companyId && l.IsActive).ToListAsync(ct);
         var lines = await _db.AccountingVoucherLines.AsNoTracking()
             .Include(l => l.Voucher)
+            .Include(l => l.Ledger)
             .Where(l => l.CompanyId == companyId
                         && l.Voucher!.VoucherStatus == VoucherStatus.Posted
                         && l.Voucher.VoucherDate.Date <= asOfDate)
@@ -196,8 +197,19 @@ public sealed class AccountingReportService : IAccountingReportService
             .Select(l => new BsSectionRow(l.LedgerName, -Closing(l)))
             .Where(r => r.Amount != 0).OrderByDescending(r => r.Amount).ToList();
 
-        // Current year P&L into equity
+        // Income/expense never sit on the sheet; their net must land in equity.
+        // CloseFinancialYearAsync only flags the year closed — it does not post
+        // to retained earnings — so profit from prior periods would otherwise
+        // vanish and the sheet would not balance.
+        var accumulatedPl = lines
+            .Where(l => l.Ledger is not null
+                        && (l.Ledger.AccountType == AccountNature.Income
+                            || l.Ledger.AccountType == AccountNature.Expense))
+            .Sum(l => l.CreditAmount - l.DebitAmount);
         var pl = await GetProfitAndLossAsync(null, asOfDate, ct);
+        var priorPl = accumulatedPl - pl.NetProfit;
+        if (Math.Abs(priorPl) >= 0.01m)
+            equity.Add(new BsSectionRow("Prior period profit / loss", priorPl));
         if (pl.NetProfit != 0)
             equity.Add(new BsSectionRow("Current Year Profit / Loss", pl.NetProfit));
 
