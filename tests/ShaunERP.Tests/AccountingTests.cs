@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using ShaunERP.Core.Accounting;
+using ShaunERP.Core.Finance;
 using ShaunERP.Core.Identity;
 using ShaunERP.Core.Platform;
 using ShaunERP.Infrastructure.Persistence;
@@ -128,8 +129,124 @@ public class AccountingTests
         var reversal = await posting.ReverseAsync(first.Id);
         Assert.Equal(25000m, reversal.TotalDebit);
         Assert.Equal(VoucherStatus.Posted, reversal.VoucherStatus);
+        Assert.Equal(first.VoucherDate.Date, reversal.VoucherDate.Date);
         var original = await db.AccountingVouchers.FirstAsync(v => v.Id == first.Id);
         Assert.Equal(VoucherStatus.Reversed, original.VoucherStatus);
+    }
+
+    [Fact]
+    public async Task Reversal_Uses_Original_Date_And_Honors_Period_Lock()
+    {
+        var (db, _, posting, accounting, _) = await CreateAsync();
+        await accounting.EnsureBootstrapAsync();
+        var fy = await db.FinancialYears.FirstAsync(y => y.CompanyId == 1);
+        var voucherDate = fy.StartDate.Date;
+        if (voucherDate >= DateTime.UtcNow.Date)
+        {
+            voucherDate = DateTime.UtcNow.Date;
+        }
+
+        var bank = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.BankDefault);
+        var rent = await db.Ledgers.FirstAsync(l => l.LedgerCode == "RENT");
+
+        var posted = await posting.PostAsync(new AccountingPostingRequest
+        {
+            TransactionDate = voucherDate,
+            VoucherTypeCode = SystemVoucherTypeCodes.Payment,
+            Lines =
+            [
+                new() { LedgerId = rent.Id, Debit = 1000 },
+                new() { LedgerId = bank.Id, Credit = 1000 }
+            ]
+        });
+        Assert.Equal(voucherDate, posted.VoucherDate.Date);
+
+        if (voucherDate < DateTime.UtcNow.Date)
+        {
+            await accounting.SetPeriodLockAsync(voucherDate, "lock original period");
+            var locked = await Assert.ThrowsAsync<InvalidOperationException>(() => posting.ReverseAsync(posted.Id));
+            Assert.Contains("locked", locked.Message, StringComparison.OrdinalIgnoreCase);
+
+            var stillPosted = await db.AccountingVouchers.FirstAsync(v => v.Id == posted.Id);
+            Assert.Equal(VoucherStatus.Posted, stillPosted.VoucherStatus);
+            return;
+        }
+
+        var reversal = await posting.ReverseAsync(posted.Id);
+        Assert.Equal(posted.VoucherDate.Date, reversal.VoucherDate.Date);
+    }
+
+    [Fact]
+    public async Task Post_Rejects_Date_Outside_Selected_Financial_Year()
+    {
+        var (db, _, posting, accounting, _) = await CreateAsync();
+        await accounting.EnsureBootstrapAsync();
+        var fy = await db.FinancialYears.FirstAsync(y => y.CompanyId == 1);
+        var bank = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.BankDefault);
+        var rent = await db.Ledgers.FirstAsync(l => l.LedgerCode == "RENT");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => posting.PostAsync(new AccountingPostingRequest
+        {
+            FinancialYearId = fy.Id,
+            TransactionDate = fy.EndDate.Date.AddDays(1),
+            VoucherTypeCode = SystemVoucherTypeCodes.Payment,
+            Lines =
+            [
+                new() { LedgerId = rent.Id, Debit = 50 },
+                new() { LedgerId = bank.Id, Credit = 50 }
+            ]
+        }));
+    }
+
+    [Fact]
+    public async Task VoidInvoice_DoesNotPersistVoid_WhenPeriodLockRejectsReversal()
+    {
+        var (db, tenant, posting, accounting, _) = await CreateAsync();
+        tenant.Set(new TenantContextSnapshot
+        {
+            UserId = 1,
+            CompanyId = 1,
+            CompanyName = "Shaun Infomedia OPC Pvt Ltd",
+            Entitlements = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ModuleKeys.Accounting, ModuleKeys.Finance
+            },
+            Permissions = new HashSet<string>(Permissions.AdminDefaults, StringComparer.OrdinalIgnoreCase)
+        });
+        var registry = new ModuleRegistry();
+        var finance = new FinanceService(db, tenant, registry, posting, accounting);
+
+        await accounting.EnsureBootstrapAsync();
+        var fy = await db.FinancialYears.FirstAsync(y => y.CompanyId == 1);
+        var invoiceDate = fy.StartDate.Date;
+        if (invoiceDate >= DateTime.UtcNow.Date)
+            invoiceDate = DateTime.UtcNow.Date;
+
+        var invoice = await finance.CreateInvoiceAsync(new Invoice
+        {
+            CustomerName = "Lock Test Customer",
+            InvoiceDate = invoiceDate,
+            DueDate = invoiceDate.AddDays(15),
+            Lines =
+            [
+                new InvoiceLine { ProductName = "Service", Quantity = 1, UnitPrice = 500 }
+            ]
+        });
+
+        var sent = await finance.MarkSentAsync(invoice.Id);
+        Assert.NotNull(sent);
+        Assert.Equal(InvoiceStatus.Sent, sent!.InvoiceStatus);
+        Assert.True(sent.AccountingVoucherId is > 0);
+
+        await accounting.SetPeriodLockAsync(invoiceDate, "lock original invoice period");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => finance.VoidInvoiceAsync(invoice.Id));
+        Assert.Contains("locked", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        var after = await db.Invoices.AsNoTracking().FirstAsync(i => i.Id == invoice.Id);
+        Assert.Equal(InvoiceStatus.Sent, after.InvoiceStatus);
+        var voucher = await db.AccountingVouchers.FirstAsync(v => v.Id == sent.AccountingVoucherId);
+        Assert.Equal(VoucherStatus.Posted, voucher.VoucherStatus);
     }
 
     [Fact]

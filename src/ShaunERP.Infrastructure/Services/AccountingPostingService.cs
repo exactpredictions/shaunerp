@@ -231,7 +231,9 @@ public sealed class AccountingPostingService : IAccountingPostingService
         var request = new AccountingPostingRequest
         {
             FinancialYearId = original.FinancialYearId,
-            TransactionDate = DateTime.UtcNow.Date,
+            // Reverse on the original voucher date so period locks apply and the
+            // offset stays in the same reporting period / financial year.
+            TransactionDate = original.VoucherDate,
             VoucherTypeCode = original.VoucherType?.Code ?? SystemVoucherTypeCodes.Journal,
             ReferenceNumber = original.VoucherNumber,
             Narration = string.IsNullOrWhiteSpace(reason)
@@ -317,9 +319,15 @@ public sealed class AccountingPostingService : IAccountingPostingService
         var d = NormalizeDate(date);
         if (financialYearId is > 0)
         {
-            return await _db.FinancialYears.FirstOrDefaultAsync(
-                       y => y.Id == financialYearId && y.CompanyId == companyId, ct)
-                   ?? throw new InvalidOperationException("Financial year not found.");
+            var selected = await _db.FinancialYears.FirstOrDefaultAsync(
+                               y => y.Id == financialYearId && y.CompanyId == companyId, ct)
+                           ?? throw new InvalidOperationException("Financial year not found.");
+            if (d.Date < selected.StartDate.Date || d.Date > selected.EndDate.Date)
+            {
+                throw new InvalidOperationException("Voucher date must fall within the selected financial year.");
+            }
+
+            return selected;
         }
 
         var fy = await _db.FinancialYears.FirstOrDefaultAsync(
