@@ -166,6 +166,49 @@ public class ProjectManagementTests
     }
 
     [Fact]
+    public async Task StopTimer_AfterMoreThan24Hours_KeepsTrackedTime()
+    {
+        await using var db = NewDb();
+        await SeedCompaniesAsync(db);
+        var service = NewService(db, companyId: 1, userId: 10);
+
+        var project = await service.CreateProjectAsync(new Project { Name = "Retainer" });
+        var task = await service.CreateTaskAsync(new ProjectTask { ProjectId = project.Id, Name = "On-call" });
+        var timer = await service.StartTimerAsync(project.Id, task.Id, "Weekend coverage");
+
+        var running = await db.ProjectTimeTrackers.SingleAsync(t => t.Id == timer.Id);
+        running.StartedAt = DateTime.UtcNow.AddHours(-48);
+        await db.SaveChangesAsync();
+
+        var entry = await service.StopTimerAsync();
+        Assert.NotNull(entry);
+        Assert.InRange(entry!.Hours, 47.9m, 48.1m);
+        Assert.Equal(TimesheetEntryStatus.Draft, entry.EntryStatus);
+        Assert.Equal(task.Id, entry.TaskId);
+
+        var stopped = await db.ProjectTimeTrackers.SingleAsync(t => t.Id == timer.Id);
+        Assert.False(stopped.IsActive);
+        Assert.NotNull(stopped.StoppedAt);
+        Assert.Null(await service.GetActiveTimerAsync());
+    }
+
+    [Fact]
+    public async Task CreateTimesheet_StillRejectsManualEntriesOver24Hours()
+    {
+        await using var db = NewDb();
+        await SeedCompaniesAsync(db);
+        var service = NewService(db, companyId: 1, userId: 10);
+
+        var project = await service.CreateProjectAsync(new Project { Name = "Retainer" });
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateTimesheetAsync(new ProjectTimesheet
+        {
+            ProjectId = project.Id,
+            Hours = 25m,
+            WorkDate = new DateTime(2026, 2, 10)
+        }));
+    }
+
+    [Fact]
     public async Task MissingPermission_BlocksProjectCreation()
     {
         await using var db = NewDb();

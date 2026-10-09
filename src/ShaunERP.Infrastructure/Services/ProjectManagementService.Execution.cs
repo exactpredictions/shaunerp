@@ -831,35 +831,7 @@ public sealed partial class ProjectManagementService
 
     public async Task<ProjectTimesheet> CreateTimesheetAsync(ProjectTimesheet entry, CancellationToken ct = default)
     {
-        EnsureAccess(Permissions.ProjectsTimesheetsCreate);
-        var project = await RequireProjectAsync(entry.ProjectId, ct);
-        var userId = entry.UserId > 0 ? entry.UserId : RequireUserId();
-        if (userId != _tenant.UserId)
-            EnsureAccess(Permissions.ProjectsTimesheetsApprove);
-        if (entry.Hours <= 0)
-            throw new InvalidOperationException("Log more than zero hours.");
-        if (entry.Hours > 24)
-            throw new InvalidOperationException("A single entry cannot exceed 24 hours.");
-        if (entry.TaskId is { } taskId &&
-            !await _db.ProjectTasks.AnyAsync(t => t.Id == taskId && t.ProjectId == project.Id, ct))
-            throw new InvalidOperationException("Task does not belong to this project.");
-
-        var billable = Math.Clamp(entry.BillableHours, 0, entry.Hours);
-        var row = new ProjectTimesheet
-        {
-            CompanyId = project.CompanyId,
-            ProjectId = project.Id,
-            TaskId = entry.TaskId,
-            UserId = userId,
-            WorkDate = NormalizeUtc(entry.WorkDate == default ? DateTime.UtcNow.Date : entry.WorkDate.Date),
-            StartTime = entry.StartTime,
-            EndTime = entry.EndTime,
-            Hours = entry.Hours,
-            BillableHours = billable,
-            NonBillableHours = entry.Hours - billable,
-            Description = NullIfBlank(entry.Description),
-            EntryStatus = TimesheetEntryStatus.Draft
-        };
+        var row = await BuildTimesheetAsync(entry, enforceDailyCap: true, ct);
         _db.ProjectTimesheets.Add(row);
         await _db.SaveChangesAsync(ct);
         await SyncTaskAndProjectHoursAsync(row.ProjectId, row.TaskId, ct);
@@ -971,14 +943,12 @@ public sealed partial class ProjectManagementService
         if (running is null) return null;
 
         var stoppedAt = DateTime.UtcNow;
-        running.StoppedAt = stoppedAt;
-        running.IsActive = false;
-
         var hours = Math.Round((decimal)(stoppedAt - running.StartedAt).TotalHours, 2, MidpointRounding.AwayFromZero);
         if (hours <= 0) hours = 0.01m;
-        await _db.SaveChangesAsync(ct);
 
-        return await CreateTimesheetAsync(new ProjectTimesheet
+        // Timer-originated entries may span more than one day (forgotten weekend timer).
+        // Persist the timesheet with the stop so a validation failure cannot drop the hours.
+        var timesheet = await BuildTimesheetAsync(new ProjectTimesheet
         {
             ProjectId = running.ProjectId,
             TaskId = running.TaskId,
@@ -987,7 +957,14 @@ public sealed partial class ProjectManagementService
             Hours = hours,
             BillableHours = hours,
             Description = running.Description ?? "Tracked with timer"
-        }, ct);
+        }, enforceDailyCap: false, ct);
+
+        _db.ProjectTimesheets.Add(timesheet);
+        running.StoppedAt = stoppedAt;
+        running.IsActive = false;
+        await _db.SaveChangesAsync(ct);
+        await SyncTaskAndProjectHoursAsync(timesheet.ProjectId, timesheet.TaskId, ct);
+        return timesheet;
     }
 
     // ——————————————————————————— Execution helpers ———————————————————————————
@@ -1037,6 +1014,40 @@ public sealed partial class ProjectManagementService
 
         await RequireProjectAsync(projectId.Value, ct);
         return projectId;
+    }
+
+    private async Task<ProjectTimesheet> BuildTimesheetAsync(
+        ProjectTimesheet entry, bool enforceDailyCap, CancellationToken ct)
+    {
+        EnsureAccess(Permissions.ProjectsTimesheetsCreate);
+        var project = await RequireProjectAsync(entry.ProjectId, ct);
+        var userId = entry.UserId > 0 ? entry.UserId : RequireUserId();
+        if (userId != _tenant.UserId)
+            EnsureAccess(Permissions.ProjectsTimesheetsApprove);
+        if (entry.Hours <= 0)
+            throw new InvalidOperationException("Log more than zero hours.");
+        if (enforceDailyCap && entry.Hours > 24)
+            throw new InvalidOperationException("A single entry cannot exceed 24 hours.");
+        if (entry.TaskId is { } taskId &&
+            !await _db.ProjectTasks.AnyAsync(t => t.Id == taskId && t.ProjectId == project.Id, ct))
+            throw new InvalidOperationException("Task does not belong to this project.");
+
+        var billable = Math.Clamp(entry.BillableHours, 0, entry.Hours);
+        return new ProjectTimesheet
+        {
+            CompanyId = project.CompanyId,
+            ProjectId = project.Id,
+            TaskId = entry.TaskId,
+            UserId = userId,
+            WorkDate = NormalizeUtc(entry.WorkDate == default ? DateTime.UtcNow.Date : entry.WorkDate.Date),
+            StartTime = entry.StartTime,
+            EndTime = entry.EndTime,
+            Hours = entry.Hours,
+            BillableHours = billable,
+            NonBillableHours = entry.Hours - billable,
+            Description = NullIfBlank(entry.Description),
+            EntryStatus = TimesheetEntryStatus.Draft
+        };
     }
 
     /// <summary>Rolls approved time up onto the task and the project.</summary>
