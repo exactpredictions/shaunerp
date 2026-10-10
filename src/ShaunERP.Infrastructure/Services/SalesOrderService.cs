@@ -245,6 +245,12 @@ public sealed class SalesOrderService : ISalesOrderService
 
         ValidateOrder(row);
         RecalcTotals(row);
+
+        var invoiced = await SumActiveInvoicedAsync(row, ct);
+        if (invoiced > row.GrandTotal + 0.01m)
+            throw new InvalidOperationException(
+                "Order total cannot be less than the amount already invoiced.");
+
         await RefreshInvoicedAmountAsync(row, ct);
         await _db.SaveChangesAsync(ct);
         return row;
@@ -422,13 +428,18 @@ public sealed class SalesOrderService : ISalesOrderService
         return await CreateOrderAsync(order, ct);
     }
 
-    private async Task RefreshInvoicedAmountAsync(SalesOrder order, CancellationToken ct)
+    private async Task<decimal> SumActiveInvoicedAsync(SalesOrder order, CancellationToken ct)
     {
         var invoices = await _db.Invoices.AsNoTracking()
             .Where(i => i.SalesOrderId == order.Id && i.CompanyId == order.CompanyId)
             .Where(i => i.InvoiceStatus != InvoiceStatus.Void)
             .ToListAsync(ct);
-        order.AmountInvoiced = invoices.Sum(i => i.GrandTotal > 0 ? i.GrandTotal : i.Amount);
+        return invoices.Sum(i => i.GrandTotal > 0 ? i.GrandTotal : i.Amount);
+    }
+
+    private async Task RefreshInvoicedAmountAsync(SalesOrder order, CancellationToken ct)
+    {
+        order.AmountInvoiced = await SumActiveInvoicedAsync(order, ct);
 
         if (order.OrderStatus == SalesOrderStatus.Cancelled) return;
 
