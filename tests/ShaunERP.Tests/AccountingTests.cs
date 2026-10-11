@@ -180,6 +180,117 @@ public class AccountingTests
         Assert.True(bs.IsBalanced);
     }
 
+    [Fact]
+    public async Task TrialBalance_Uses_Ledger_Opening_When_No_Opening_Voucher()
+    {
+        var (db, _, _, accounting, reports) = await CreateAsync();
+        await accounting.EnsureBootstrapAsync();
+
+        var bank = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.BankDefault);
+        var capital = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.Capital);
+        bank.OpeningBalance = 100000;
+        bank.OpeningBalanceType = BalanceSide.Debit;
+        capital.OpeningBalance = 100000;
+        capital.OpeningBalanceType = BalanceSide.Credit;
+        await db.SaveChangesAsync();
+
+        var tb = await reports.GetTrialBalanceAsync(null, null);
+        Assert.True(tb.IsBalanced);
+        var bankRow = Assert.Single(tb.Rows, r => r.LedgerId == bank.Id);
+        Assert.Equal(100000m, bankRow.OpeningDebit);
+        Assert.Equal(100000m, bankRow.ClosingDebit);
+        var capitalRow = Assert.Single(tb.Rows, r => r.LedgerId == capital.Id);
+        Assert.Equal(100000m, capitalRow.OpeningCredit);
+        Assert.Equal(100000m, capitalRow.ClosingCredit);
+    }
+
+    [Fact]
+    public async Task Posted_Opening_Voucher_Does_Not_Double_Count_Ledger_Opening_Fields()
+    {
+        var (db, _, _, accounting, reports) = await CreateAsync();
+        await accounting.EnsureBootstrapAsync();
+
+        var bank = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.BankDefault);
+        var capital = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.Capital);
+        // CSV / ledger-master path already stored the same opening on the master.
+        bank.OpeningBalance = 250000;
+        bank.OpeningBalanceType = BalanceSide.Debit;
+        capital.OpeningBalance = 250000;
+        capital.OpeningBalanceType = BalanceSide.Credit;
+        await db.SaveChangesAsync();
+
+        await accounting.CreateOpeningBalancesAsync(
+        [
+            new AccountingPostingLineRequest { LedgerId = bank.Id, Debit = 250000 },
+            new AccountingPostingLineRequest { LedgerId = capital.Id, Credit = 250000 }
+        ]);
+
+        await db.Entry(bank).ReloadAsync();
+        await db.Entry(capital).ReloadAsync();
+        Assert.Equal(0m, bank.OpeningBalance);
+        Assert.Equal(0m, capital.OpeningBalance);
+
+        var fy = await db.FinancialYears.FirstAsync(y => y.CompanyId == 1 && y.IsCurrent);
+        var tb = await reports.GetTrialBalanceAsync(fy.StartDate, fy.EndDate);
+        Assert.True(tb.IsBalanced);
+        var bankRow = Assert.Single(tb.Rows, r => r.LedgerId == bank.Id);
+        Assert.Equal(250000m, bankRow.ClosingDebit);
+        var capitalRow = Assert.Single(tb.Rows, r => r.LedgerId == capital.Id);
+        Assert.Equal(250000m, capitalRow.ClosingCredit);
+
+        var bs = await reports.GetBalanceSheetAsync(fy.EndDate);
+        Assert.True(bs.IsBalanced);
+        var bankBs = Assert.Single(bs.Assets, a => a.Label == bank.LedgerName);
+        Assert.Equal(250000m, bankBs.Amount);
+
+        var gl = await reports.GetGeneralLedgerAsync(bank.Id, fy.StartDate, fy.EndDate);
+        Assert.Equal(0m, gl.OpeningBalance);
+        Assert.Equal(250000m, gl.ClosingBalance);
+        Assert.Equal(250000m, gl.Lines.Sum(l => l.Debit - l.Credit));
+    }
+
+    [Fact]
+    public async Task Reports_Ignore_Stale_Ledger_Opening_When_Opening_Voucher_Already_Posted()
+    {
+        var (db, _, posting, accounting, reports) = await CreateAsync();
+        await accounting.EnsureBootstrapAsync();
+
+        var bank = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.BankDefault);
+        var capital = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.Capital);
+        var fy = await db.FinancialYears.FirstAsync(y => y.CompanyId == 1 && y.IsCurrent);
+
+        await posting.PostAsync(new AccountingPostingRequest
+        {
+            FinancialYearId = fy.Id,
+            TransactionDate = fy.StartDate,
+            VoucherTypeCode = SystemVoucherTypeCodes.OpeningBalance,
+            SourceModule = AccountingSourceModules.Opening,
+            SourceEntityType = "FinancialYear",
+            SourceEntityId = fy.Id.ToString(),
+            PostingType = "Opening",
+            Lines =
+            [
+                new() { LedgerId = bank.Id, Debit = 80000 },
+                new() { LedgerId = capital.Id, Credit = 80000 }
+            ]
+        });
+
+        // Re-import / ledger edit after post would restore the staging field.
+        bank.OpeningBalance = 80000;
+        bank.OpeningBalanceType = BalanceSide.Debit;
+        capital.OpeningBalance = 80000;
+        capital.OpeningBalanceType = BalanceSide.Credit;
+        await db.SaveChangesAsync();
+
+        var tb = await reports.GetTrialBalanceAsync(fy.StartDate, fy.EndDate);
+        Assert.True(tb.IsBalanced);
+        Assert.Equal(80000m, Assert.Single(tb.Rows, r => r.LedgerId == bank.Id).ClosingDebit);
+
+        var bs = await reports.GetBalanceSheetAsync(fy.EndDate);
+        Assert.True(bs.IsBalanced);
+        Assert.Equal(80000m, Assert.Single(bs.Assets, a => a.Label == bank.LedgerName).Amount);
+    }
+
     private static async Task<(ShaunErpDbContext db, TenantContext tenant, AccountingPostingService posting, AccountingService accounting, AccountingReportService reports)> CreateAsync()
     {
         var options = new DbContextOptionsBuilder<ShaunErpDbContext>()

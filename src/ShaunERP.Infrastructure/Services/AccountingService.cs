@@ -780,7 +780,7 @@ public sealed class AccountingService : IAccountingService
             });
         }
 
-        return await _posting.PostAsync(new AccountingPostingRequest
+        var voucher = await _posting.PostAsync(new AccountingPostingRequest
         {
             FinancialYearId = fy.Id,
             TransactionDate = fy.StartDate,
@@ -793,6 +793,21 @@ public sealed class AccountingService : IAccountingService
             PostImmediately = true,
             Lines = working
         }, ct);
+
+        // Ledger.OpeningBalance is the CSV/master staging field. After a posted OB voucher
+        // those amounts live on the voucher — leaving the field set double-counts reports.
+        var postedLedgerIds = voucher.Lines.Select(l => l.LedgerId).Distinct().ToList();
+        var staged = await _db.Ledgers
+            .Where(l => l.CompanyId == RequireCompanyId() && postedLedgerIds.Contains(l.Id) && l.OpeningBalance != 0)
+            .ToListAsync(ct);
+        if (staged.Count > 0)
+        {
+            foreach (var ledger in staged)
+                ledger.OpeningBalance = 0;
+            await _db.SaveChangesAsync(ct);
+        }
+
+        return voucher;
     }
 
     private async Task BootstrapCompanyAsync(int companyId, CancellationToken ct)
