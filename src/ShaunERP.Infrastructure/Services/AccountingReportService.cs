@@ -69,7 +69,7 @@ public sealed class AccountingReportService : IAccountingReportService
             .OrderBy(l => l.Voucher!.VoucherDate).ThenBy(l => l.VoucherId).ThenBy(l => l.SortOrder)
             .ToListAsync(ct);
 
-        var opening = ledger.OpeningBalanceType == BalanceSide.Debit ? ledger.OpeningBalance : -ledger.OpeningBalance;
+        var opening = LedgerFieldOpening(ledger, all.Select(l => l.Voucher));
         opening += all.Where(l => l.Voucher!.VoucherDate.Date < fromDate).Sum(l => l.DebitAmount - l.CreditAmount);
 
         var period = all.Where(l => l.Voucher!.VoucherDate.Date >= fromDate && l.Voucher!.VoucherDate.Date <= toDate).ToList();
@@ -96,7 +96,7 @@ public sealed class AccountingReportService : IAccountingReportService
 
         var ledgers = await _db.Ledgers.AsNoTracking().Where(l => l.CompanyId == companyId && l.IsActive).ToListAsync(ct);
         var lines = await _db.AccountingVoucherLines.AsNoTracking()
-            .Include(l => l.Voucher)
+            .Include(l => l.Voucher!).ThenInclude(v => v.VoucherType)
             .Where(l => l.CompanyId == companyId && l.Voucher!.VoucherStatus == VoucherStatus.Posted)
             .ToListAsync(ct);
 
@@ -105,7 +105,7 @@ public sealed class AccountingReportService : IAccountingReportService
         {
             var ledgerLines = lines.Where(l => l.LedgerId == ledger.Id).ToList();
             var openMov = ledgerLines.Where(l => l.Voucher!.VoucherDate.Date < fromDate).Sum(l => l.DebitAmount - l.CreditAmount);
-            var open = (ledger.OpeningBalanceType == BalanceSide.Debit ? ledger.OpeningBalance : -ledger.OpeningBalance) + openMov;
+            var open = LedgerFieldOpening(ledger, ledgerLines.Select(l => l.Voucher)) + openMov;
             var period = ledgerLines.Where(l => l.Voucher!.VoucherDate.Date >= fromDate && l.Voucher!.VoucherDate.Date <= toDate).ToList();
             var pd = period.Sum(l => l.DebitAmount);
             var pc = period.Sum(l => l.CreditAmount);
@@ -172,7 +172,7 @@ public sealed class AccountingReportService : IAccountingReportService
 
         var ledgers = await _db.Ledgers.AsNoTracking().Where(l => l.CompanyId == companyId && l.IsActive).ToListAsync(ct);
         var lines = await _db.AccountingVoucherLines.AsNoTracking()
-            .Include(l => l.Voucher)
+            .Include(l => l.Voucher!).ThenInclude(v => v.VoucherType)
             .Where(l => l.CompanyId == companyId
                         && l.Voucher!.VoucherStatus == VoucherStatus.Posted
                         && l.Voucher.VoucherDate.Date <= asOfDate)
@@ -180,8 +180,9 @@ public sealed class AccountingReportService : IAccountingReportService
 
         decimal Closing(Ledger ledger)
         {
-            var open = ledger.OpeningBalanceType == BalanceSide.Debit ? ledger.OpeningBalance : -ledger.OpeningBalance;
-            return open + lines.Where(l => l.LedgerId == ledger.Id).Sum(l => l.DebitAmount - l.CreditAmount);
+            var ledgerLines = lines.Where(l => l.LedgerId == ledger.Id).ToList();
+            var open = LedgerFieldOpening(ledger, ledgerLines.Select(l => l.Voucher));
+            return open + ledgerLines.Sum(l => l.DebitAmount - l.CreditAmount);
         }
 
         var assets = ledgers.Where(l => l.AccountType == AccountNature.Asset)
@@ -287,6 +288,24 @@ public sealed class AccountingReportService : IAccountingReportService
             l.Ledger?.LedgerName ?? "", l.Description ?? l.Voucher.Narration,
             l.DebitAmount, l.CreditAmount, l.VoucherId)).ToList();
     }
+
+    /// <summary>
+    /// Ledger.OpeningBalance is a staging field used by CSV / ledger-master import.
+    /// Once a posted opening voucher exists for the ledger, that voucher is the book of record —
+    /// adding the field on top double-counts cash, bank, and capital and unbalances TB/BS.
+    /// </summary>
+    private static decimal LedgerFieldOpening(Ledger ledger, IEnumerable<AccountingVoucher?> vouchers)
+    {
+        if (vouchers.Any(IsPostedOpeningVoucher))
+            return 0;
+        return ledger.OpeningBalanceType == BalanceSide.Debit ? ledger.OpeningBalance : -ledger.OpeningBalance;
+    }
+
+    private static bool IsPostedOpeningVoucher(AccountingVoucher? voucher)
+        => voucher is { VoucherStatus: VoucherStatus.Posted }
+           && (string.Equals(voucher.PostingType, "Opening", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(voucher.SourceModule, AccountingSourceModules.Opening, StringComparison.OrdinalIgnoreCase)
+               || string.Equals(voucher.VoucherType?.Code, SystemVoucherTypeCodes.OpeningBalance, StringComparison.OrdinalIgnoreCase));
 
     private void EnsureAccess()
     {
