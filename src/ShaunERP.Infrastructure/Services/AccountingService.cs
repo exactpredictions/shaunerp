@@ -608,6 +608,8 @@ public sealed class AccountingService : IAccountingService
                 entity.BankAccountNumber = ledger.BankAccountNumber;
                 entity.BankIfsc = ledger.BankIfsc;
                 entity.BankName = ledger.BankName;
+                entity.OpeningBalance = ledger.OpeningBalance;
+                entity.OpeningBalanceType = ledger.OpeningBalanceType;
                 await _db.SaveChangesAsync(ct);
                 await _audit.WriteAsync("accounting.ledger.updated", companyId, _tenant.UserId,
                     nameof(Ledger), entity.Id.ToString(), ct: ct);
