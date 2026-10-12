@@ -133,6 +133,54 @@ public class AccountingTests
     }
 
     [Fact]
+    public async Task UpsertLedger_PersistsOpeningBalance_OnSystemCashAndCapital()
+    {
+        var (db, _, _, accounting, reports) = await CreateAsync();
+        await accounting.EnsureBootstrapAsync();
+
+        var cash = await db.Ledgers.AsNoTracking().FirstAsync(l => l.SystemCode == SystemLedgerCodes.Cash);
+        var capital = await db.Ledgers.AsNoTracking().FirstAsync(l => l.SystemCode == SystemLedgerCodes.Capital);
+
+        await accounting.UpsertLedgerAsync(new Ledger
+        {
+            Id = cash.Id,
+            LedgerCode = cash.LedgerCode,
+            LedgerName = cash.LedgerName,
+            AccountGroupId = cash.AccountGroupId,
+            OpeningBalance = 125000m,
+            OpeningBalanceType = BalanceSide.Debit,
+            IsActive = true
+        });
+        await accounting.UpsertLedgerAsync(new Ledger
+        {
+            Id = capital.Id,
+            LedgerCode = capital.LedgerCode,
+            LedgerName = capital.LedgerName,
+            AccountGroupId = capital.AccountGroupId,
+            OpeningBalance = 125000m,
+            OpeningBalanceType = BalanceSide.Credit,
+            IsActive = true
+        });
+
+        var cashAfter = await db.Ledgers.AsNoTracking().FirstAsync(l => l.Id == cash.Id);
+        var capitalAfter = await db.Ledgers.AsNoTracking().FirstAsync(l => l.Id == capital.Id);
+        Assert.Equal(125000m, cashAfter.OpeningBalance);
+        Assert.Equal(BalanceSide.Debit, cashAfter.OpeningBalanceType);
+        Assert.Equal(125000m, capitalAfter.OpeningBalance);
+        Assert.Equal(BalanceSide.Credit, capitalAfter.OpeningBalanceType);
+
+        var gl = await reports.GetGeneralLedgerAsync(cash.Id, DateTime.UtcNow.Date, DateTime.UtcNow.Date);
+        Assert.Equal(125000m, gl.OpeningBalance);
+
+        var tb = await reports.GetTrialBalanceAsync(DateTime.UtcNow.Date, DateTime.UtcNow.Date);
+        var cashRow = tb.Rows.Single(r => r.LedgerId == cash.Id);
+        var capitalRow = tb.Rows.Single(r => r.LedgerId == capital.Id);
+        Assert.Equal(125000m, cashRow.OpeningDebit);
+        Assert.Equal(125000m, capitalRow.OpeningCredit);
+        Assert.True(tb.IsBalanced);
+    }
+
+    [Fact]
     public async Task ProfitAndLoss_And_BalanceSheet_Reflect_Posted_Activity()
     {
         var (db, _, posting, accounting, reports) = await CreateAsync();
