@@ -252,6 +252,63 @@ public class PartyIdentityTests
     }
 
     [Fact]
+    public async Task Backfill_shared_family_phone_does_not_link_to_the_first_indexed_party()
+    {
+        await using var db = CreateDb();
+        var kumar = await SeedPartyAsync(db, 1, "Ravi", "Kumar", "9876543210", "ravi.kumar@example.com");
+        var patel = await SeedPartyAsync(db, 1, "Ravi", "Patel", "9876543210", "ravi.patel@example.com");
+        Assert.NotEqual(kumar.Id, patel.Id);
+
+        db.Leads.Add(new Lead
+        {
+            CompanyId = 1,
+            FirstName = "Ravi",
+            LastName = "Patel",
+            Mobile = "9876543210",
+            CreatedDate = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var report = await CreateBackfill(db, 1).BackfillAsync(new LeadPartyBackfillOptions { CompanyId = 1, BatchSize = 50 });
+        var lead = await db.Leads.SingleAsync();
+
+        Assert.True(report.AmbiguousRecords >= 1);
+        Assert.NotNull(lead.PartyId);
+        // NamesLookDifferent treats "Ravi Kumar" vs "Ravi Patel" as compatible (same first name).
+        // The old TryAdd index would therefore attach this lead to whichever sibling was indexed first.
+        Assert.NotEqual(kumar.Id, lead.PartyId);
+        Assert.NotEqual(patel.Id, lead.PartyId);
+    }
+
+    [Fact]
+    public async Task Backfill_shared_phone_plus_unique_email_links_the_matching_party()
+    {
+        await using var db = CreateDb();
+        var kumar = await SeedPartyAsync(db, 1, "Ravi", "Kumar", "9876543210", "ravi.kumar@example.com");
+        var patel = await SeedPartyAsync(db, 1, "Ravi", "Patel", "9876543210", "ravi.patel@example.com");
+
+        db.Leads.Add(new Lead
+        {
+            CompanyId = 1,
+            FirstName = "Ravi",
+            LastName = "Patel",
+            Mobile = "9876543210",
+            Email = "ravi.patel@example.com",
+            CreatedDate = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var report = await CreateBackfill(db, 1).BackfillAsync(new LeadPartyBackfillOptions { CompanyId = 1, BatchSize = 50 });
+        var lead = await db.Leads.SingleAsync();
+
+        Assert.Equal(patel.Id, lead.PartyId);
+        Assert.NotEqual(kumar.Id, lead.PartyId);
+        Assert.Equal(1, report.PhoneAndEmailMatches);
+        Assert.Equal(1, report.LinkedExisting);
+        Assert.Equal(2, await db.Parties.CountAsync());
+    }
+
+    [Fact]
     public async Task Conversion_preserves_party_id_through_customer()
     {
         await using var db = CreateDb();

@@ -206,8 +206,10 @@ public sealed class LeadPartyBackfillService : ILeadPartyBackfillService
         await _db.SaveChangesAsync(ct);
 
         // Warm identity indexes once (avoids per-lead MatchAsync DB roundtrips).
-        var phoneToParty = new Dictionary<string, int>(StringComparer.Ordinal);
-        var emailToParty = new Dictionary<string, int>(StringComparer.Ordinal);
+        // Track every party per phone/email — TryAdd would hide shared/family numbers
+        // and silently attach leads to whichever party happened to be indexed first.
+        var phoneToParties = new Dictionary<string, HashSet<int>>(StringComparer.Ordinal);
+        var emailToParties = new Dictionary<string, HashSet<int>>(StringComparer.Ordinal);
         var partyNames = new Dictionary<int, string>();
 
         var phoneRows = await (
@@ -217,7 +219,7 @@ public sealed class LeadPartyBackfillService : ILeadPartyBackfillService
             select new { ph.NormalizedPhone, ph.PartyId, p.DisplayName }).ToListAsync(ct);
         foreach (var row in phoneRows)
         {
-            phoneToParty.TryAdd(row.NormalizedPhone!, row.PartyId);
+            IndexParty(phoneToParties, row.NormalizedPhone, row.PartyId);
             partyNames.TryAdd(row.PartyId, row.DisplayName);
         }
 
@@ -228,7 +230,7 @@ public sealed class LeadPartyBackfillService : ILeadPartyBackfillService
             select new { em.NormalizedEmail, em.PartyId, p.DisplayName }).ToListAsync(ct);
         foreach (var row in emailRows)
         {
-            emailToParty.TryAdd(row.NormalizedEmail!, row.PartyId);
+            IndexParty(emailToParties, row.NormalizedEmail, row.PartyId);
             partyNames.TryAdd(row.PartyId, row.DisplayName);
         }
 
@@ -240,7 +242,7 @@ public sealed class LeadPartyBackfillService : ILeadPartyBackfillService
             .ToListAsync(ct);
 
         batch.TotalRows = pending.Count;
-        report.Messages.Add($"Fast backfill pending={pending.Count} companyId={companyId} batchId={batch.Id} indexPhones={phoneToParty.Count} indexEmails={emailToParty.Count}");
+        report.Messages.Add($"Fast backfill pending={pending.Count} companyId={companyId} batchId={batch.Id} indexPhones={phoneToParties.Count} indexEmails={emailToParties.Count}");
         await _db.SaveChangesAsync(ct);
         _db.ChangeTracker.Clear();
 
@@ -268,32 +270,45 @@ public sealed class LeadPartyBackfillService : ILeadPartyBackfillService
                     var hasPhone = !string.IsNullOrWhiteSpace(phoneNorm.NormalizedPhone) && phoneNorm.NormalizedPhone!.Length >= 8;
                     var hasEmail = !string.IsNullOrWhiteSpace(emailNorm);
 
-                    int? phoneParty = hasPhone && phoneToParty.TryGetValue(phoneNorm.NormalizedPhone!, out var pp) ? pp : null;
-                    int? emailParty = hasEmail && emailToParty.TryGetValue(emailNorm!, out var ep) ? ep : null;
+                    var phoneIds = hasPhone ? LookupParties(phoneToParties, phoneNorm.NormalizedPhone) : [];
+                    var emailIds = hasEmail ? LookupParties(emailToParties, emailNorm) : [];
+                    var both = phoneIds.Intersect(emailIds).ToList();
 
                     int? partyId = null;
                     var linked = false;
                     var needsReview = false;
                     var matchStatus = ImportMatchStatuses.Created;
                     var matchReason = "Created new PartyPerson.";
+                    int? candidatePartyId = both.Count > 0 ? both[0]
+                        : phoneIds.Count > 0 ? phoneIds[0]
+                        : emailIds.Count > 0 ? emailIds[0]
+                        : null;
 
-                    if (phoneParty is int pBoth && emailParty == pBoth)
+                    if (both.Count == 1)
                     {
-                        partyId = pBoth;
+                        partyId = both[0];
                         linked = true;
                         matchStatus = ImportMatchStatuses.Linked;
                         matchReason = "Matched by phone and email (memory index).";
                         report.PhoneAndEmailMatches++;
                     }
-                    else if (phoneParty is int pPhone && emailParty is int pEmail && pPhone != pEmail)
+                    else if (both.Count > 1)
+                    {
+                        needsReview = true;
+                        matchStatus = ImportMatchStatuses.Ambiguous;
+                        matchReason = "Multiple parties share this phone+email combination.";
+                        report.AmbiguousRecords++;
+                    }
+                    else if (phoneIds.Count > 0 && emailIds.Count > 0)
                     {
                         needsReview = true;
                         matchStatus = ImportMatchStatuses.Conflict;
                         matchReason = "ConflictingPhoneAndEmail: phone and email resolve to different parties.";
                         report.ConflictingRecords++;
                     }
-                    else if (phoneParty is int onlyPhone && emailParty is null)
+                    else if (phoneIds.Count == 1 && emailIds.Count == 0)
                     {
+                        var onlyPhone = phoneIds[0];
                         if (hasEmail)
                         {
                             needsReview = true;
@@ -317,8 +332,9 @@ public sealed class LeadPartyBackfillService : ILeadPartyBackfillService
                             report.ExactPhoneMatches++;
                         }
                     }
-                    else if (emailParty is int onlyEmail && phoneParty is null)
+                    else if (emailIds.Count == 1 && phoneIds.Count == 0)
                     {
+                        var onlyEmail = emailIds[0];
                         if (hasPhone)
                         {
                             needsReview = true;
@@ -341,6 +357,20 @@ public sealed class LeadPartyBackfillService : ILeadPartyBackfillService
                             matchReason = "Matched by email (memory index).";
                             report.ExactEmailMatches++;
                         }
+                    }
+                    else if (phoneIds.Count > 1)
+                    {
+                        needsReview = true;
+                        matchStatus = ImportMatchStatuses.Ambiguous;
+                        matchReason = "Multiple parties share this normalized phone (possible shared/family number).";
+                        report.AmbiguousRecords++;
+                    }
+                    else if (emailIds.Count > 1)
+                    {
+                        needsReview = true;
+                        matchStatus = ImportMatchStatuses.Ambiguous;
+                        matchReason = "Multiple parties share this email.";
+                        report.AmbiguousRecords++;
                     }
 
                     if (partyId is int existingPartyId)
@@ -369,7 +399,7 @@ public sealed class LeadPartyBackfillService : ILeadPartyBackfillService
                     }
 
                     var display = _parties.BuildDisplayName(lead.FirstName, lead.LastName, lead.Email ?? primaryPhone);
-                    pendingCreates.Add((lead, display, phoneNorm, emailNorm, needsReview, matchStatus, matchReason, phoneParty ?? emailParty));
+                    pendingCreates.Add((lead, display, phoneNorm, emailNorm, needsReview, matchStatus, matchReason, candidatePartyId));
                 }
                 catch (Exception ex)
                 {
@@ -442,7 +472,7 @@ public sealed class LeadPartyBackfillService : ILeadPartyBackfillService
                         CreatedDate = DateTime.UtcNow,
                         Status = "Active"
                     });
-                    phoneToParty.TryAdd(item.Phone.NormalizedPhone!, party.Id);
+                    IndexParty(phoneToParties, item.Phone.NormalizedPhone, party.Id);
                 }
 
                 if (!string.IsNullOrWhiteSpace(item.EmailNorm))
@@ -458,7 +488,7 @@ public sealed class LeadPartyBackfillService : ILeadPartyBackfillService
                         CreatedDate = DateTime.UtcNow,
                         Status = "Active"
                     });
-                    emailToParty.TryAdd(item.EmailNorm!, party.Id);
+                    IndexParty(emailToParties, item.EmailNorm, party.Id);
                 }
 
                 if (item.NeedsReview)
@@ -521,6 +551,32 @@ public sealed class LeadPartyBackfillService : ILeadPartyBackfillService
         final.Success = final.Failed == 0 && final.LeadsWithoutPartyId == 0;
         final.Messages.Add($"Batch {batch.Id} status={batch.BatchStatus}");
         return final;
+    }
+
+    private static void IndexParty(Dictionary<string, HashSet<int>> index, string? key, int partyId)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return;
+        }
+
+        if (!index.TryGetValue(key, out var set))
+        {
+            set = [];
+            index[key] = set;
+        }
+
+        set.Add(partyId);
+    }
+
+    private static List<int> LookupParties(Dictionary<string, HashSet<int>> index, string? key)
+    {
+        if (string.IsNullOrWhiteSpace(key) || !index.TryGetValue(key, out var set))
+        {
+            return [];
+        }
+
+        return set.ToList();
     }
 
     private static bool NamesLookDifferent(string? existingDisplay, string? firstName, string? lastName)
