@@ -97,7 +97,15 @@
 
     private async Task DeleteAsync()
     {
-        if (await Crm.DeleteCustomerAsync(Id)) Nav.NavigateTo("/crm/customers");
-        else _error = "Delete failed.";
+        _error = null;
+        try
+        {
+            if (await Crm.DeleteCustomerAsync(Id)) Nav.NavigateTo("/crm/customers");
+            else _error = "Delete failed.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            _error = ex.Message;
+        }
     }
 }

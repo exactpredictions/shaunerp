@@ -2,9 +2,11 @@ using Microsoft.EntityFrameworkCore;
 using ShaunERP.Core.Crm;
 using ShaunERP.Core.Identity;
 using ShaunERP.Core.Platform;
+using ShaunERP.Core.Sales;
 using ShaunERP.Infrastructure.Persistence;
 using ShaunERP.Infrastructure.Platform;
 using ShaunERP.Infrastructure.Services.Identity;
+using InvoiceStatus = ShaunERP.Core.Finance.InvoiceStatus;
 
 namespace ShaunERP.Infrastructure.Services;
 
@@ -1016,6 +1018,28 @@ public partial class CrmService : ICrmService
         EnsureCrmAccess(Permissions.CrmCustomersDelete);
         var row = await FindOwnedAsync(_db.CrmCustomers, id, ct);
         if (row is null) return false;
+
+        var companyId = RequireCompanyId();
+        var hasInvoices = await _db.Invoices.AnyAsync(
+            i => i.CustomerId == id
+                 && i.CompanyId == companyId
+                 && i.InvoiceStatus != InvoiceStatus.Void, ct);
+        if (hasInvoices)
+        {
+            throw new InvalidOperationException(
+                "Customers with invoices cannot be deleted. Void or reassign the invoices first.");
+        }
+
+        var hasOrders = await _db.SalesOrders.AnyAsync(
+            o => o.CustomerId == id
+                 && o.CompanyId == companyId
+                 && o.OrderStatus != SalesOrderStatus.Cancelled, ct);
+        if (hasOrders)
+        {
+            throw new InvalidOperationException(
+                "Customers with sales orders cannot be deleted. Cancel or reassign the orders first.");
+        }
+
         _db.CrmCustomers.Remove(row);
         await _db.SaveChangesAsync(ct);
         return true;

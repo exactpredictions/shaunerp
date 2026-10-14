@@ -230,7 +230,16 @@ public class CrmController : ControllerBase
 
     [HttpDelete("customers/{id:int}")]
     public async Task<IActionResult> DeleteCustomer(int id, CancellationToken ct)
-        => await _crm.DeleteCustomerAsync(id, ct) ? NoContent() : NotFound();
+    {
+        try
+        {
+            return await _crm.DeleteCustomerAsync(id, ct) ? NoContent() : NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
 
     // —— Campaigns ——
     [HttpGet("campaigns")]
