@@ -848,6 +848,15 @@ public partial class CrmService : ICrmService
 
         if (account is null && !string.IsNullOrWhiteSpace(deal.AccountName))
         {
+            var accountName = deal.AccountName.Trim();
+            account = await TenantFilter(_db.CrmAccounts)
+                .FirstOrDefaultAsync(a => a.AccountName == accountName, ct);
+            if (account is not null)
+                deal.AccountId = account.Id;
+        }
+
+        if (account is null && !string.IsNullOrWhiteSpace(deal.AccountName))
+        {
             account = new Account
             {
                 CompanyId = RequireCompanyId(),
@@ -883,7 +892,21 @@ public partial class CrmService : ICrmService
             partyId = contact?.PartyId;
         }
 
-        var customer = new Customer
+        var customer = await FindExistingCustomerForWonDealAsync(
+            partyId, account?.Id ?? deal.AccountId, deal.AccountName ?? account?.AccountName, ct);
+        if (customer is not null)
+        {
+            if (customer.AccountId is null && account is not null)
+                customer.AccountId = account.Id;
+            if (customer.PartyId is null && partyId is not null)
+                customer.PartyId = partyId;
+            deal.CustomerId = customer.Id;
+            deal.PartyId ??= partyId ?? customer.PartyId;
+            await _db.SaveChangesAsync(ct);
+            return (true, null, customer);
+        }
+
+        customer = new Customer
         {
             CompanyId = RequireCompanyId(),
             CompanyName = deal.AccountName ?? account?.AccountName ?? deal.DealName,
@@ -1181,6 +1204,36 @@ public partial class CrmService : ICrmService
             CreateReviewOnAmbiguous = true
         }, ct);
         return ensure.PartyId;
+    }
+
+    /// <summary>
+    /// One bill-to customer per party/account. A second won deal must not mint a parallel AR master.
+    /// </summary>
+    private async Task<Customer?> FindExistingCustomerForWonDealAsync(
+        int? partyId, int? accountId, string? accountName, CancellationToken ct)
+    {
+        if (partyId is int pid)
+        {
+            var byParty = await TenantFilter(_db.CrmCustomers)
+                .FirstOrDefaultAsync(c => c.PartyId == pid, ct);
+            if (byParty is not null) return byParty;
+        }
+
+        if (accountId is int aid)
+        {
+            var byAccount = await TenantFilter(_db.CrmCustomers)
+                .FirstOrDefaultAsync(c => c.AccountId == aid, ct);
+            if (byAccount is not null) return byAccount;
+        }
+
+        if (!string.IsNullOrWhiteSpace(accountName))
+        {
+            var name = accountName.Trim();
+            return await TenantFilter(_db.CrmCustomers)
+                .FirstOrDefaultAsync(c => c.CompanyName == name, ct);
+        }
+
+        return null;
     }
 
     private async Task<int?> ResolveRelatedPartyIdAsync(Opportunity deal, CancellationToken ct)

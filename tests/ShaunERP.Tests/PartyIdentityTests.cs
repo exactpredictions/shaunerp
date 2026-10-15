@@ -282,6 +282,69 @@ public class PartyIdentityTests
     }
 
     [Fact]
+    public async Task WinOpportunity_reuses_customer_for_second_deal_on_same_account()
+    {
+        await using var db = CreateDb();
+        var crm = CreateCrm(db, companyId: 1);
+
+        var first = await crm.CreateOpportunityAsync(new Opportunity
+        {
+            DealName = "Initial rollout",
+            AccountName = "Harbor Logistics",
+            ContactName = "Priya Nair",
+            Amount = 120000m
+        });
+        var (ok1, err1, customer1) = await crm.WinOpportunityAsync(first.Id);
+        Assert.True(ok1, err1);
+        Assert.NotNull(customer1);
+
+        var second = await crm.CreateOpportunityAsync(new Opportunity
+        {
+            DealName = "Upsell year 2",
+            AccountName = "Harbor Logistics",
+            ContactName = "Priya Nair",
+            Amount = 45000m,
+            AccountId = customer1!.AccountId,
+            PartyId = customer1.PartyId
+        });
+        var (ok2, err2, customer2) = await crm.WinOpportunityAsync(second.Id);
+        Assert.True(ok2, err2);
+        Assert.NotNull(customer2);
+        Assert.Equal(customer1.Id, customer2!.Id);
+        Assert.Equal(1, await db.CrmCustomers.CountAsync(c => c.CompanyId == 1));
+        Assert.Equal(1, await db.CrmAccounts.CountAsync(a => a.CompanyId == 1 && a.AccountName == "Harbor Logistics"));
+
+        var deals = await db.Opportunities.Where(o => o.CompanyId == 1).ToListAsync();
+        Assert.All(deals, d => Assert.Equal(customer1.Id, d.CustomerId));
+    }
+
+    [Fact]
+    public async Task WinOpportunity_reuses_existing_bill_to_customer_by_company_name()
+    {
+        await using var db = CreateDb();
+        var crm = CreateCrm(db, companyId: 1);
+        var existing = await crm.CreateCustomerAsync(new Customer
+        {
+            CompanyName = "Apex Manufacturing",
+            PrimaryContact = "Karthik",
+            PaymentTerms = "Net 15",
+            CreditLimit = 500000m
+        });
+
+        var deal = await crm.CreateOpportunityAsync(new Opportunity
+        {
+            DealName = "Plant expansion",
+            AccountName = "Apex Manufacturing",
+            Amount = 80000m
+        });
+        var (ok, error, customer) = await crm.WinOpportunityAsync(deal.Id);
+        Assert.True(ok, error);
+        Assert.Equal(existing.Id, customer!.Id);
+        Assert.Equal(1, await db.CrmCustomers.CountAsync(c => c.CompanyId == 1));
+        Assert.Equal(existing.CreditLimit, (await db.CrmCustomers.SingleAsync(c => c.Id == existing.Id)).CreditLimit);
+    }
+
+    [Fact]
     public async Task Contact_update_creates_party_and_attaches_channels()
     {
         await using var db = CreateDb();
