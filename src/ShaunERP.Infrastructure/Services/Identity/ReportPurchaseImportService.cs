@@ -277,38 +277,9 @@ public sealed class ReportPurchaseImportService : IReportPurchaseImportService
                     continue;
                 }
 
-                if (partyId is null)
-                {
-                    if (match.Confidence is IdentityMatchConfidence.Ambiguous or IdentityMatchConfidence.Conflict
-                        && match.Candidates.Count > 0)
-                    {
-                        var candidateIds = match.Candidates.Select(c => c.PartyId).Distinct().ToList();
-                        var preferred = await _db.CourseEnrollments.AsNoTracking()
-                            .Where(e => e.CompanyId == companyId && candidateIds.Contains(e.PartyId))
-                            .OrderBy(e => e.PartyId)
-                            .Select(e => (int?)e.PartyId)
-                            .FirstOrDefaultAsync(ct)
-                            ?? await _db.SubscriptionMemberships.AsNoTracking()
-                                .Where(m => m.CompanyId == companyId && candidateIds.Contains(m.PartyId))
-                                .OrderBy(m => m.PartyId)
-                                .Select(m => (int?)m.PartyId)
-                                .FirstOrDefaultAsync(ct)
-                            ?? await _db.ReportPurchases.AsNoTracking()
-                                .Where(p => p.CompanyId == companyId && candidateIds.Contains(p.PartyId))
-                                .OrderBy(p => p.PartyId)
-                                .Select(p => (int?)p.PartyId)
-                                .FirstOrDefaultAsync(ct);
-
-                        if (preferred is int reuse)
-                        {
-                            partyId = reuse;
-                            report.ExistingPartiesReused++;
-                            report.ReviewQueued++;
-                            batch!.ReviewRows++;
-                        }
-                    }
-                }
-
+                // Ambiguous/conflict must not reuse an enrolled/subscribed candidate.
+                // Shared family phones would attach the purchase to the wrong sibling;
+                // identity review does not re-link purchases after the fact.
                 if (partyId is null)
                 {
                     var ensure = await _parties.EnsurePersonPartyAsync(new EnsurePartyRequest

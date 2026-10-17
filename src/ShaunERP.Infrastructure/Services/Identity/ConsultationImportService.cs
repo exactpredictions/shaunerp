@@ -242,29 +242,9 @@ public sealed class ConsultationImportService : IConsultationImportService
                     continue;
                 }
 
-                if (partyId is null && match.Confidence is IdentityMatchConfidence.Ambiguous or IdentityMatchConfidence.Conflict
-                    && match.Candidates.Count > 0)
-                {
-                    var candidateIds = match.Candidates.Select(c => c.PartyId).Distinct().ToList();
-                    var preferred = await _db.CourseEnrollments.AsNoTracking()
-                        .Where(e => e.CompanyId == companyId && candidateIds.Contains(e.PartyId))
-                        .OrderBy(e => e.PartyId).Select(e => (int?)e.PartyId).FirstOrDefaultAsync(ct)
-                        ?? await _db.SubscriptionMemberships.AsNoTracking()
-                            .Where(m => m.CompanyId == companyId && candidateIds.Contains(m.PartyId))
-                            .OrderBy(m => m.PartyId).Select(m => (int?)m.PartyId).FirstOrDefaultAsync(ct)
-                        ?? await _db.ReportPurchases.AsNoTracking()
-                            .Where(r => r.CompanyId == companyId && candidateIds.Contains(r.PartyId))
-                            .OrderBy(r => r.PartyId).Select(r => (int?)r.PartyId).FirstOrDefaultAsync(ct);
-
-                    if (preferred is int reuse)
-                    {
-                        partyId = reuse;
-                        report.ExistingPartiesReused++;
-                        report.ReviewQueued++;
-                        batch!.ReviewRows++;
-                    }
-                }
-
+                // Ambiguous/conflict must not reuse an enrolled/subscribed candidate.
+                // Shared family phones would attach the consultation to the wrong sibling;
+                // identity review does not re-link engagements after the fact.
                 if (partyId is null)
                 {
                     var ensure = await _parties.EnsurePersonPartyAsync(new EnsurePartyRequest

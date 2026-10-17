@@ -205,25 +205,9 @@ public sealed class StudentImportService : IStudentImportService
                 }
                 else
                 {
-                    // Prefer an existing student (enrollment) candidate over creating a duplicate person.
-                    if (match.Confidence is IdentityMatchConfidence.Ambiguous or IdentityMatchConfidence.Conflict
-                        && match.Candidates.Count > 0)
-                    {
-                        var candidateIds = match.Candidates.Select(c => c.PartyId).Distinct().ToList();
-                        var studentCandidate = await _db.CourseEnrollments.AsNoTracking()
-                            .Where(e => e.CompanyId == companyId && candidateIds.Contains(e.PartyId))
-                            .OrderBy(e => e.PartyId)
-                            .Select(e => (int?)e.PartyId)
-                            .FirstOrDefaultAsync(ct);
-                        if (studentCandidate is int reuseStudent)
-                        {
-                            partyId = reuseStudent;
-                            report.ExistingPartiesReused++;
-                            report.ReviewQueued++;
-                            batch!.ReviewRows++;
-                        }
-                    }
-
+                    // Ambiguous/conflict must not reuse an enrolled candidate. Shared family
+                    // phones would attach the new row to the wrong sibling; identity review
+                    // does not move enrollments after the fact. Create a new party instead.
                     if (partyId is null)
                     {
                         var ensure = await _parties.EnsurePersonPartyAsync(new EnsurePartyRequest

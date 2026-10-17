@@ -266,24 +266,9 @@ public sealed class PremiumSubscriberImportService : IPremiumSubscriberImportSer
                 }
                 else
                 {
-                    if (match.Confidence is IdentityMatchConfidence.Ambiguous or IdentityMatchConfidence.Conflict
-                        && match.Candidates.Count > 0)
-                    {
-                        var candidateIds = match.Candidates.Select(c => c.PartyId).Distinct().ToList();
-                        var studentCandidate = await _db.CourseEnrollments.AsNoTracking()
-                            .Where(e => e.CompanyId == companyId && candidateIds.Contains(e.PartyId))
-                            .OrderBy(e => e.PartyId)
-                            .Select(e => (int?)e.PartyId)
-                            .FirstOrDefaultAsync(ct);
-                        if (studentCandidate is int reuseStudent)
-                        {
-                            partyId = reuseStudent;
-                            stats.ExistingPartiesReused++;
-                            stats.ReviewQueued++;
-                            batch!.ReviewRows++;
-                        }
-                    }
-
+                    // Ambiguous/conflict must not reuse an enrolled candidate. Shared family
+                    // phones would attach the new membership to the wrong sibling; identity
+                    // review does not re-link memberships after the fact.
                     if (partyId is null)
                     {
                         var ensure = await _parties.EnsurePersonPartyAsync(new EnsurePartyRequest
