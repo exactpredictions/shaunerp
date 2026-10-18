@@ -59,18 +59,22 @@ public sealed class ContactsCsvImporter : EntityCsvImporterBase
             if (!CsvValidator.TryRequired(CsvValidator.Get(values, "LastName"), "LastName", out var e3)) errors.Add(e3!);
             if (!CsvValidator.TryEmail(email, out var e4) && e4 is not null) errors.Add(e4);
 
-            var account = CsvValidator.Get(values, "AccountNumber");
-            if (!string.IsNullOrWhiteSpace(account) && !customers.ContainsKey(account))
-            {
-                warnings.Add($"Customer account '{account}' not found; contact will be created without customer link.");
-            }
-
             int? existingId = null;
             var action = "Create";
             if (!string.IsNullOrWhiteSpace(email) && byEmail.TryGetValue(email, out var id))
             {
                 existingId = id;
                 action = "Update";
+            }
+
+            var account = CsvValidator.Get(values, "AccountNumber");
+            if (!string.IsNullOrWhiteSpace(account) && !customers.ContainsKey(account))
+            {
+                warnings.Add($"Customer account '{account}' not found; contact will be created without customer link.");
+            }
+            else if (string.IsNullOrWhiteSpace(account) && action == "Update")
+            {
+                warnings.Add("AccountNumber omitted; existing customer link will be kept.");
             }
 
             rows.Add(new CsvRowValidation
@@ -107,6 +111,14 @@ public sealed class ContactsCsvImporter : EntityCsvImporterBase
                 if (!string.IsNullOrWhiteSpace(account) && customers.TryGetValue(account, out var cid))
                 {
                     customerId = cid;
+                }
+
+                if (row.ExistingId is int existingId && string.IsNullOrWhiteSpace(account))
+                {
+                    customerId = await _db.Contacts
+                        .Where(c => c.Id == existingId && c.CompanyId == companyId)
+                        .Select(c => c.CustomerId)
+                        .FirstAsync(ct);
                 }
 
                 var contact = new Contact
