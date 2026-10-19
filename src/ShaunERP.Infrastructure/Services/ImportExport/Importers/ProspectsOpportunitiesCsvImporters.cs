@@ -207,6 +207,10 @@ public sealed class OpportunitiesCsvImporter : EntityCsvImporterBase
             {
                 id = eid;
                 action = "Update";
+                if (string.IsNullOrWhiteSpace(acct))
+                    warnings.Add("Customer account omitted — existing customer, lead, and account links will be kept.");
+                if (string.IsNullOrWhiteSpace(CsvValidator.Get(values, "Stage")))
+                    warnings.Add("Stage omitted — existing pipeline stage (including Closed Won/Lost) will be kept.");
             }
 
             rows.Add(new CsvRowValidation
@@ -225,7 +229,7 @@ public sealed class OpportunitiesCsvImporter : EntityCsvImporterBase
             .Where(c => c.CompanyId == companyId && c.AccountNumber != null)
             .ToDictionaryAsync(c => c.AccountNumber!, c => c.Id, StringComparer.OrdinalIgnoreCase, ct);
         var created = 0; var updated = 0;
-        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+        var tx = _db.Database.IsRelational() ? await _db.Database.BeginTransactionAsync(ct) : null;
         try
         {
             foreach (var row in preview.Rows.Where(r => r.IsValid))
@@ -240,39 +244,70 @@ public sealed class OpportunitiesCsvImporter : EntityCsvImporterBase
                     customerId = cid;
                 }
 
-                var deal = new Opportunity
-                {
-                    CompanyId = companyId,
-                    DealName = CsvValidator.Get(row.Values, "DealName"),
-                    Amount = amount ?? 0,
-                    Stage = Null(CsvValidator.Get(row.Values, "Stage")) ?? "Qualification",
-                    Probability = probability.HasValue ? (double)probability.Value : null,
-                    CustomerId = customerId,
-                    CurrencyCode = Null(CsvValidator.Get(row.Values, "CurrencyCode")) ?? "INR",
-                    ClosingDate = close,
-                    DealOwner = Null(CsvValidator.Get(row.Values, "DealOwner")),
-                    Tags = Null(CsvValidator.Get(row.Values, "Tags"))
-                };
+                var stage = Null(CsvValidator.Get(row.Values, "Stage"));
                 if (row.ExistingId is int id)
                 {
-                    deal.Id = id;
-                    await _crm.UpdateOpportunityAsync(id, deal, ct);
+                    var existing = await _crm.GetOpportunityAsync(id, ct);
+                    if (existing is null)
+                        continue;
+
+                    existing.DealName = CsvValidator.Get(row.Values, "DealName");
+                    if (amount.HasValue)
+                        existing.Amount = amount.Value;
+                    if (stage is not null)
+                        existing.Stage = stage;
+                    if (probability.HasValue)
+                        existing.Probability = (double)probability.Value;
+                    if (customerId is not null)
+                        existing.CustomerId = customerId;
+                    var currency = Null(CsvValidator.Get(row.Values, "CurrencyCode"));
+                    if (currency is not null)
+                        existing.CurrencyCode = currency;
+                    if (close.HasValue)
+                        existing.ClosingDate = close;
+                    var owner = Null(CsvValidator.Get(row.Values, "DealOwner"));
+                    if (owner is not null)
+                        existing.DealOwner = owner;
+                    var tags = Null(CsvValidator.Get(row.Values, "Tags"));
+                    if (tags is not null)
+                        existing.Tags = tags;
+
+                    await _crm.UpdateOpportunityAsync(id, existing, ct);
                     updated++;
                 }
                 else
                 {
-                    await _crm.CreateOpportunityAsync(deal, ct);
+                    await _crm.CreateOpportunityAsync(new Opportunity
+                    {
+                        CompanyId = companyId,
+                        DealName = CsvValidator.Get(row.Values, "DealName"),
+                        Amount = amount ?? 0,
+                        Stage = stage ?? "Qualification",
+                        Probability = probability.HasValue ? (double)probability.Value : null,
+                        CustomerId = customerId,
+                        CurrencyCode = Null(CsvValidator.Get(row.Values, "CurrencyCode")) ?? "INR",
+                        ClosingDate = close,
+                        DealOwner = Null(CsvValidator.Get(row.Values, "DealOwner")),
+                        Tags = Null(CsvValidator.Get(row.Values, "Tags"))
+                    }, ct);
                     created++;
                 }
             }
 
-            await tx.CommitAsync(ct);
+            if (tx is not null)
+                await tx.CommitAsync(ct);
             return new CsvImportResult { EntityKey = EntityKey, Success = true, Created = created, Updated = updated, Skipped = preview.InvalidCount };
         }
         catch (Exception ex)
         {
-            await tx.RollbackAsync(ct);
+            if (tx is not null)
+                await tx.RollbackAsync(ct);
             return new CsvImportResult { EntityKey = EntityKey, Success = false, Messages = [ex.Message] };
+        }
+        finally
+        {
+            if (tx is not null)
+                await tx.DisposeAsync();
         }
     }
 
