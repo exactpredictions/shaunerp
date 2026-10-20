@@ -282,6 +282,39 @@ public class PartyIdentityTests
     }
 
     [Fact]
+    public async Task ConvertLead_second_call_does_not_insert_another_account()
+    {
+        await using var db = CreateDb();
+        var crm = CreateCrm(db, companyId: 1);
+        var lead = await crm.CreateLeadAsync(new Lead
+        {
+            FirstName = "Dev",
+            LastName = "Patel",
+            CompanyName = "Patel Co",
+            Mobile = "9888777666",
+            Email = "dev@patel.com"
+        });
+
+        var request = new LeadConversionRequest(
+            CreateProspect: true, CreateAccount: true, CreateContact: true, CreateOpportunity: true,
+            OpportunityName: "Deal", OpportunityAmount: 1000);
+        var first = await crm.ConvertLeadAsync(lead.Id, request);
+        Assert.True(first.Ok, first.Error);
+        Assert.Equal(1, await db.CrmAccounts.CountAsync());
+        Assert.Equal(1, await db.Prospects.CountAsync());
+        Assert.Equal(1, await db.Contacts.CountAsync());
+        Assert.Equal(1, await db.Opportunities.CountAsync());
+
+        var second = await crm.ConvertLeadAsync(lead.Id, request);
+        Assert.False(second.Ok);
+        Assert.Contains("already converted", second.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, await db.CrmAccounts.CountAsync());
+        Assert.Equal(1, await db.Prospects.CountAsync());
+        Assert.Equal(1, await db.Contacts.CountAsync());
+        Assert.Equal(1, await db.Opportunities.CountAsync());
+    }
+
+    [Fact]
     public async Task Contact_update_creates_party_and_attaches_channels()
     {
         await using var db = CreateDb();

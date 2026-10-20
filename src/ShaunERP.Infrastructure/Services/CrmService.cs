@@ -426,6 +426,21 @@ public partial class CrmService : ICrmService
         var lead = await FindOwnedAsync(_db.Leads, leadId, ct);
         if (lead is null) return (false, "Lead not found.", null);
 
+        // Must run before any writes. CreateAccount SaveChanges used to commit a new
+        // Account first, so a second Convert (UI double-click / retry) left a duplicate
+        // commercial master and then failed on this check.
+        if (request.CreateProspect
+            && await TenantFilter(_db.Prospects).AnyAsync(p => p.LeadId == leadId, ct))
+        {
+            return (false, "Lead already converted to a prospect.", null);
+        }
+
+        if (request.CreateOpportunity
+            && await TenantFilter(_db.Opportunities).AnyAsync(o => o.LeadId == leadId, ct))
+        {
+            return (false, "Lead already converted to an opportunity.", null);
+        }
+
         lead.IsQualified = true;
         lead.LeadStatus = "Qualified";
         var companyId = RequireCompanyId();
@@ -464,9 +479,6 @@ public partial class CrmService : ICrmService
 
         if (request.CreateProspect)
         {
-            if (await TenantFilter(_db.Prospects).AnyAsync(p => p.LeadId == leadId, ct))
-                return (false, "Lead already converted to a prospect.", null);
-
             prospect = new Prospect
             {
                 CompanyId = companyId,
