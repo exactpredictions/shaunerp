@@ -115,7 +115,27 @@ public sealed class InvoicesCsvImporter : EntityCsvImporterBase
 
                 if (row.ExistingId is int id)
                 {
-                    await _finance.UpdateInvoiceAsync(id, invoice, ct);
+                    var existing = await _db.Invoices
+                        .FirstOrDefaultAsync(i => i.Id == id && i.CompanyId == companyId, ct)
+                        ?? throw new InvalidOperationException($"Invoice '{invoice.InvoiceNumber}' was not found.");
+                    if (existing.InvoiceStatus is InvoiceStatus.Void or InvoiceStatus.Paid)
+                        throw new InvalidOperationException("Paid or void invoices cannot be edited.");
+
+                    // Header-only CSV never carries lines. UpdateInvoiceAsync replaces the line
+                    // collection, which would delete billed items and recalc GrandTotal to zero.
+                    existing.CustomerId = customer.Id;
+                    existing.CustomerName = customer.CompanyName;
+                    if (invDate is not null)
+                        existing.InvoiceDate = invDate.Value;
+                    if (due is not null)
+                        existing.DueDate = due;
+                    if (Null(CsvValidator.Get(row.Values, "CurrencyCode")) is string currency)
+                        existing.CurrencyCode = currency;
+                    if (Null(CsvValidator.Get(row.Values, "PaymentTerms")) is string terms)
+                        existing.PaymentTerms = terms;
+                    if (Null(CsvValidator.Get(row.Values, "Notes")) is string notes)
+                        existing.Notes = notes;
+                    await _db.SaveChangesAsync(ct);
                     updated++;
                 }
                 else
@@ -346,6 +366,7 @@ public sealed class SalesOrdersCsvImporter : EntityCsvImporterBase
             {
                 id = eid;
                 action = "Update";
+                warnings.Add("Updating existing order header only.");
             }
 
             rows.Add(new CsvRowValidation
@@ -387,7 +408,25 @@ public sealed class SalesOrdersCsvImporter : EntityCsvImporterBase
                 };
                 if (row.ExistingId is int id)
                 {
-                    await _orders.UpdateOrderAsync(id, order, ct);
+                    var existing = await _db.SalesOrders
+                        .FirstOrDefaultAsync(o => o.Id == id && o.CompanyId == companyId, ct)
+                        ?? throw new InvalidOperationException($"Sales order '{order.OrderNumber}' was not found.");
+                    if (existing.OrderStatus is SalesOrderStatus.Cancelled or SalesOrderStatus.Invoiced)
+                        throw new InvalidOperationException("Cancelled or fully invoiced orders cannot be edited.");
+
+                    // Header-only CSV never carries lines. UpdateOrderAsync replaces the line
+                    // collection, which would delete order items and recalc GrandTotal to zero.
+                    existing.CustomerId = customer.Id;
+                    existing.CustomerName = customer.CompanyName;
+                    if (orderDate is not null)
+                        existing.OrderDate = orderDate.Value;
+                    if (Null(CsvValidator.Get(row.Values, "CurrencyCode")) is string currency)
+                        existing.CurrencyCode = currency;
+                    if (Null(CsvValidator.Get(row.Values, "PaymentTerms")) is string terms)
+                        existing.PaymentTerms = terms;
+                    if (Null(CsvValidator.Get(row.Values, "Notes")) is string notes)
+                        existing.Notes = notes;
+                    await _db.SaveChangesAsync(ct);
                     updated++;
                 }
                 else
