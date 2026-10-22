@@ -214,6 +214,8 @@ public sealed class AccountingService : IAccountingService
     {
         EnsureAccess(Permissions.CompanySettingsEdit);
         var companyId = RequireCompanyId();
+        var registrationType = row.RegistrationType.Trim();
+        var registrationNumber = row.RegistrationNumber.Trim();
         CompanyStatutoryRegistration entity;
         if (row.Id > 0)
         {
@@ -221,12 +223,18 @@ public sealed class AccountingService : IAccountingService
         }
         else
         {
-            entity = new CompanyStatutoryRegistration { CompanyId = companyId, CreatedDate = DateTime.UtcNow };
-            _db.CompanyStatutoryRegistrations.Add(entity);
+            // Config DTOs have no Ids. Re-applying an export must update the same GSTIN/CIN row.
+            entity = await _db.CompanyStatutoryRegistrations.FirstOrDefaultAsync(
+                         s => s.CompanyId == companyId
+                              && s.RegistrationType.ToLower() == registrationType.ToLower()
+                              && s.RegistrationNumber.ToLower() == registrationNumber.ToLower(), ct)
+                     ?? new CompanyStatutoryRegistration { CompanyId = companyId, CreatedDate = DateTime.UtcNow };
+            if (entity.Id == 0)
+                _db.CompanyStatutoryRegistrations.Add(entity);
         }
 
-        entity.RegistrationType = row.RegistrationType.Trim();
-        entity.RegistrationNumber = row.RegistrationNumber.Trim();
+        entity.RegistrationType = registrationType;
+        entity.RegistrationNumber = registrationNumber;
         entity.RegistrationDate = row.RegistrationDate;
         entity.ExpiryDate = row.ExpiryDate;
         entity.IssuingAuthority = row.IssuingAuthority;
@@ -327,6 +335,7 @@ public sealed class AccountingService : IAccountingService
     {
         EnsureAccess(Permissions.AccountingSettingsManage);
         var companyId = RequireCompanyId();
+        var code = currency.CurrencyCode.Trim().ToUpperInvariant();
         CurrencyMaster entity;
         if (currency.Id > 0)
         {
@@ -334,11 +343,16 @@ public sealed class AccountingService : IAccountingService
         }
         else
         {
-            entity = new CurrencyMaster { CompanyId = companyId, CreatedDate = DateTime.UtcNow };
-            _db.Currencies.Add(entity);
+            // Company config export/apply omits Ids. Match the unique (CompanyId, CurrencyCode)
+            // key so a second apply updates INR instead of inserting a duplicate that Postgres rejects.
+            entity = await _db.Currencies.FirstOrDefaultAsync(
+                         c => c.CompanyId == companyId && c.CurrencyCode.ToUpper() == code, ct)
+                     ?? new CurrencyMaster { CompanyId = companyId, CreatedDate = DateTime.UtcNow };
+            if (entity.Id == 0)
+                _db.Currencies.Add(entity);
         }
 
-        entity.CurrencyCode = currency.CurrencyCode.Trim().ToUpperInvariant();
+        entity.CurrencyCode = code;
         entity.CurrencyName = currency.CurrencyName.Trim();
         entity.Symbol = currency.Symbol;
         entity.DecimalPlaces = currency.DecimalPlaces;
