@@ -56,16 +56,20 @@ public sealed class ProspectsCsvImporter : EntityCsvImporterBase
             if (!CsvValidator.TryEmail(email, out var e4) && e4 is not null) errors.Add(e4);
             int? id = null;
             var action = "Create";
+            var warnings = new List<string>();
             if (!string.IsNullOrWhiteSpace(email) && byEmail.TryGetValue(email, out var eid))
             {
                 id = eid;
                 action = "Update";
+                warnings.Add("CSV has no LeadId/AccountId columns — existing conversion links will be kept.");
+                if (string.IsNullOrWhiteSpace(CsvValidator.Get(values, "Stage")))
+                    warnings.Add("Stage omitted — existing prospect stage will be kept.");
             }
 
             rows.Add(new CsvRowValidation
             {
                 RowNumber = n, IsValid = errors.Count == 0, Action = action, Values = values,
-                Errors = errors, MatchKey = email, ExistingId = id
+                Errors = errors, Warnings = warnings, MatchKey = email, ExistingId = id
             });
         }
 
@@ -75,45 +79,83 @@ public sealed class ProspectsCsvImporter : EntityCsvImporterBase
     public override async Task<CsvImportResult> ApplyAsync(CsvImportPreview preview, int companyId, CancellationToken ct = default)
     {
         var created = 0; var updated = 0;
-        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+        var tx = _db.Database.IsRelational() ? await _db.Database.BeginTransactionAsync(ct) : null;
         try
         {
             foreach (var row in preview.Rows.Where(r => r.IsValid))
             {
-                var p = new Prospect
-                {
-                    CompanyId = companyId,
-                    Email = CsvValidator.Get(row.Values, "Email"),
-                    FirstName = CsvValidator.Get(row.Values, "FirstName"),
-                    LastName = CsvValidator.Get(row.Values, "LastName"),
-                    CompanyName = Null(CsvValidator.Get(row.Values, "CompanyName")),
-                    PhoneNumber = Null(CsvValidator.Get(row.Values, "PhoneNumber")),
-                    Stage = Null(CsvValidator.Get(row.Values, "Stage")) ?? "Engaged",
-                    Source = Null(CsvValidator.Get(row.Values, "Source")),
-                    Industry = Null(CsvValidator.Get(row.Values, "Industry")),
-                    Territory = Null(CsvValidator.Get(row.Values, "Territory")),
-                    Tags = Null(CsvValidator.Get(row.Values, "Tags"))
-                };
+                var email = CsvValidator.Get(row.Values, "Email");
+                var firstName = CsvValidator.Get(row.Values, "FirstName");
+                var lastName = CsvValidator.Get(row.Values, "LastName");
+                var companyName = Null(CsvValidator.Get(row.Values, "CompanyName"));
+                var phone = Null(CsvValidator.Get(row.Values, "PhoneNumber"));
+                var stage = Null(CsvValidator.Get(row.Values, "Stage"));
+                var source = Null(CsvValidator.Get(row.Values, "Source"));
+                var industry = Null(CsvValidator.Get(row.Values, "Industry"));
+                var territory = Null(CsvValidator.Get(row.Values, "Territory"));
+                var tags = Null(CsvValidator.Get(row.Values, "Tags"));
+
                 if (row.ExistingId is int id)
                 {
-                    p.Id = id;
-                    await _crm.UpdateProspectAsync(id, p, ct);
+                    var existing = await _crm.GetProspectAsync(id, ct);
+                    if (existing is null)
+                        continue;
+
+                    existing.Email = email;
+                    existing.FirstName = firstName;
+                    existing.LastName = lastName;
+                    if (companyName is not null)
+                        existing.CompanyName = companyName;
+                    if (phone is not null)
+                        existing.PhoneNumber = phone;
+                    if (stage is not null)
+                        existing.Stage = stage;
+                    if (source is not null)
+                        existing.Source = source;
+                    if (industry is not null)
+                        existing.Industry = industry;
+                    if (territory is not null)
+                        existing.Territory = territory;
+                    if (tags is not null)
+                        existing.Tags = tags;
+
+                    await _crm.UpdateProspectAsync(id, existing, ct);
                     updated++;
                 }
                 else
                 {
-                    await _crm.CreateProspectAsync(p, ct);
+                    await _crm.CreateProspectAsync(new Prospect
+                    {
+                        CompanyId = companyId,
+                        Email = email,
+                        FirstName = firstName,
+                        LastName = lastName,
+                        CompanyName = companyName,
+                        PhoneNumber = phone,
+                        Stage = stage ?? "Engaged",
+                        Source = source,
+                        Industry = industry,
+                        Territory = territory,
+                        Tags = tags
+                    }, ct);
                     created++;
                 }
             }
 
-            await tx.CommitAsync(ct);
+            if (tx is not null)
+                await tx.CommitAsync(ct);
             return new CsvImportResult { EntityKey = EntityKey, Success = true, Created = created, Updated = updated, Skipped = preview.InvalidCount };
         }
         catch (Exception ex)
         {
-            await tx.RollbackAsync(ct);
+            if (tx is not null)
+                await tx.RollbackAsync(ct);
             return new CsvImportResult { EntityKey = EntityKey, Success = false, Messages = [ex.Message] };
+        }
+        finally
+        {
+            if (tx is not null)
+                await tx.DisposeAsync();
         }
     }
 
