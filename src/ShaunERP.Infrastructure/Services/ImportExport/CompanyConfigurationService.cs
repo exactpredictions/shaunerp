@@ -349,10 +349,18 @@ public sealed class CompanyConfigurationService : ICompanyConfigurationService
             book.LegalName = proposed.Financial.BooksLegalName ?? proposed.Identity.LegalName;
             book.TaxId = proposed.Financial.TaxId ?? proposed.Identity.PrimaryGstin;
             book.Currency = string.IsNullOrWhiteSpace(proposed.Financial.BaseCurrency) ? "INR" : proposed.Financial.BaseCurrency;
+            var currentInvoicePrefix = book.InvoiceNumberPrefix;
+            var currentInvoiceSequence = book.NextInvoiceSequence;
+            var currentOrderPrefix = book.OrderNumberPrefix;
+            var currentOrderSequence = book.NextOrderSequence;
             book.InvoiceNumberPrefix = proposed.Invoice.InvoiceNumberPrefix;
-            book.NextInvoiceSequence = proposed.Invoice.NextInvoiceSequence;
+            book.NextInvoiceSequence = NextMonotonicDocumentSequence(
+                currentInvoicePrefix, currentInvoiceSequence,
+                proposed.Invoice.InvoiceNumberPrefix, proposed.Invoice.NextInvoiceSequence);
             book.OrderNumberPrefix = proposed.Invoice.OrderNumberPrefix;
-            book.NextOrderSequence = proposed.Invoice.NextOrderSequence;
+            book.NextOrderSequence = NextMonotonicDocumentSequence(
+                currentOrderPrefix, currentOrderSequence,
+                proposed.Invoice.OrderNumberPrefix, proposed.Invoice.NextOrderSequence);
             book.DefaultPaymentTerms = proposed.Invoice.DefaultPaymentTerms;
             book.DefaultDueDays = proposed.Invoice.DefaultDueDays;
             book.BillingStreet = proposed.Invoice.BillingStreet;
@@ -592,6 +600,28 @@ public sealed class CompanyConfigurationService : ICompanyConfigurationService
         Add("AccountingSettings.AutoPostSalesInvoice", current.AccountingSettings.AutoPostSalesInvoice, proposed.AccountingSettings.AutoPostSalesInvoice);
         Add("Banking.DefaultBankLedgerCode", current.Banking.DefaultBankLedgerCode, proposed.Banking.DefaultBankLedgerCode);
         return items;
+    }
+
+    /// <summary>
+    /// Keep live numbering when the India template (or an older export) reapplies the
+    /// same prefix at a lower sequence. A prefix change is a new series, so the proposed
+    /// start is accepted.
+    /// </summary>
+    public static int NextMonotonicDocumentSequence(
+        string? currentPrefix,
+        int currentSequence,
+        string? proposedPrefix,
+        int proposedSequence)
+    {
+        if (proposedSequence < 1)
+            return Math.Max(currentSequence, 1);
+
+        var samePrefix = string.Equals(
+            (currentPrefix ?? string.Empty).Trim(),
+            (proposedPrefix ?? string.Empty).Trim(),
+            StringComparison.OrdinalIgnoreCase);
+
+        return samePrefix ? Math.Max(currentSequence, proposedSequence) : proposedSequence;
     }
 
     private void EnsureManage()
