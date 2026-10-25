@@ -353,28 +353,38 @@ public sealed class LedgersCsvImporter : EntityCsvImporterBase
                 var group = groups[CsvValidator.Get(row.Values, "GroupCode")];
                 CsvValidator.TryDecimal(CsvValidator.Get(row.Values, "OpeningBalance"), out var ob, out _);
                 var sideText = CsvValidator.Get(row.Values, "OpeningBalanceType");
-                var side = sideText.Equals("Credit", StringComparison.OrdinalIgnoreCase)
-                    ? BalanceSide.Credit
-                    : BalanceSide.Debit;
-                var ledger = new Ledger
-                {
-                    CompanyId = companyId,
-                    LedgerCode = CsvValidator.Get(row.Values, "LedgerCode"),
-                    LedgerName = CsvValidator.Get(row.Values, "LedgerName"),
-                    AccountGroupId = group.Id,
-                    AccountType = group.Nature,
-                    OpeningBalance = ob ?? 0,
-                    OpeningBalanceType = side,
-                    Gstin = Null(CsvValidator.Get(row.Values, "Gstin")),
-                    Pan = Null(CsvValidator.Get(row.Values, "Pan")),
-                    IsCashLedger = Bool(CsvValidator.Get(row.Values, "IsCashLedger")),
-                    IsBankLedger = Bool(CsvValidator.Get(row.Values, "IsBankLedger")),
-                    IsActive = true
-                };
+                var cashText = CsvValidator.Get(row.Values, "IsCashLedger");
+                var bankText = CsvValidator.Get(row.Values, "IsBankLedger");
+
+                // Preserve non-CSV fields (CustomerId, bank details, GST flags) on update.
+                Ledger ledger;
                 if (row.ExistingId is int id)
                 {
-                    ledger.Id = id;
+                    ledger = await _db.Ledgers.AsNoTracking()
+                        .FirstAsync(l => l.Id == id && l.CompanyId == companyId, ct);
                 }
+                else
+                {
+                    ledger = new Ledger { CompanyId = companyId, IsActive = true };
+                }
+
+                ledger.LedgerCode = CsvValidator.Get(row.Values, "LedgerCode");
+                ledger.LedgerName = CsvValidator.Get(row.Values, "LedgerName");
+                ledger.AccountGroupId = group.Id;
+                ledger.AccountType = group.Nature;
+                ledger.Gstin = Null(CsvValidator.Get(row.Values, "Gstin"));
+                ledger.Pan = Null(CsvValidator.Get(row.Values, "Pan"));
+                ledger.IsActive = true;
+                if (ob is not null)
+                    ledger.OpeningBalance = ob.Value;
+                if (sideText.Equals("Credit", StringComparison.OrdinalIgnoreCase))
+                    ledger.OpeningBalanceType = BalanceSide.Credit;
+                else if (sideText.Equals("Debit", StringComparison.OrdinalIgnoreCase))
+                    ledger.OpeningBalanceType = BalanceSide.Debit;
+                if (!string.IsNullOrWhiteSpace(cashText))
+                    ledger.IsCashLedger = Bool(cashText);
+                if (!string.IsNullOrWhiteSpace(bankText))
+                    ledger.IsBankLedger = Bool(bankText);
 
                 await _accounting.UpsertLedgerAsync(ledger, ct);
                 if (row.ExistingId is null) created++;
