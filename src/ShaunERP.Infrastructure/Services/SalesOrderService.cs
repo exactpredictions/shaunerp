@@ -179,6 +179,7 @@ public sealed class SalesOrderService : ISalesOrderService
             order.OrderNumber = await NextOrderNumberAsync(book, ct);
         else
             order.OrderNumber = order.OrderNumber.Trim();
+        await EnsureUniqueOrderNumberAsync(order.OrderNumber, exceptOrderId: null, ct);
 
         foreach (var line in order.Lines)
         {
@@ -218,7 +219,10 @@ public sealed class SalesOrderService : ISalesOrderService
         row.OrderDate = NormalizeUtc(update.OrderDate) ?? row.OrderDate;
         row.RequestedDeliveryDate = NormalizeUtc(update.RequestedDeliveryDate);
         if (row.OrderStatus == SalesOrderStatus.Draft && !string.IsNullOrWhiteSpace(update.OrderNumber))
+        {
             row.OrderNumber = update.OrderNumber.Trim();
+            await EnsureUniqueOrderNumberAsync(row.OrderNumber, row.Id, ct);
+        }
 
         await ResolveCustomerAsync(row, ct);
 
@@ -283,6 +287,10 @@ public sealed class SalesOrderService : ISalesOrderService
         {
             var book = await _finance.GetOrCreateBillingBookAsync(ct);
             row.OrderNumber = await NextOrderNumberAsync(book, ct);
+        }
+        else
+        {
+            await EnsureUniqueOrderNumberAsync(row.OrderNumber, row.Id, ct);
         }
 
         if (row.OrderStatus == SalesOrderStatus.Draft)
@@ -450,11 +458,39 @@ public sealed class SalesOrderService : ISalesOrderService
         if (book.NextOrderSequence < 1)
             book.NextOrderSequence = 1001;
 
+        // Skip numbers already used (manual entry or a sequence that was rewound).
         var tracked = await _db.CompanyMasters.FirstAsync(b => b.Id == book.Id, ct);
-        var number = $"{tracked.OrderNumberPrefix}{tracked.NextOrderSequence}";
-        tracked.NextOrderSequence++;
-        await _db.SaveChangesAsync(ct);
-        return number;
+        if (string.IsNullOrWhiteSpace(tracked.OrderNumberPrefix))
+            tracked.OrderNumberPrefix = "SO-";
+        if (tracked.NextOrderSequence < 1)
+            tracked.NextOrderSequence = 1001;
+
+        for (var attempt = 0; attempt < 10_000; attempt++)
+        {
+            var number = $"{tracked.OrderNumberPrefix}{tracked.NextOrderSequence}";
+            tracked.NextOrderSequence++;
+            if (!await OrderNumberTakenAsync(number, exceptOrderId: null, ct))
+            {
+                await _db.SaveChangesAsync(ct);
+                return number;
+            }
+        }
+
+        throw new InvalidOperationException("Could not allocate a unique order number.");
+    }
+
+    private async Task EnsureUniqueOrderNumberAsync(string orderNumber, int? exceptOrderId, CancellationToken ct)
+    {
+        if (await OrderNumberTakenAsync(orderNumber, exceptOrderId, ct))
+            throw new InvalidOperationException($"Order number '{orderNumber.Trim()}' is already used.");
+    }
+
+    private async Task<bool> OrderNumberTakenAsync(string orderNumber, int? exceptOrderId, CancellationToken ct)
+    {
+        var normalized = orderNumber.Trim().ToLower();
+        var exceptId = exceptOrderId ?? 0;
+        return await TenantOrders(_db.SalesOrders)
+            .AnyAsync(o => o.Id != exceptId && o.OrderNumber.ToLower() == normalized, ct);
     }
 
     private async Task ResolveCustomerAsync(SalesOrder order, CancellationToken ct)

@@ -318,9 +318,7 @@ public sealed class SalesOrdersCsvImporter : EntityCsvImporterBase
 
     public override async Task<CsvImportPreview> PreviewAsync(CsvParseResult parsed, int companyId, CancellationToken ct = default)
     {
-        var existing = await _db.SalesOrders.AsNoTracking()
-            .Where(o => o.CompanyId == companyId)
-            .ToDictionaryAsync(o => o.OrderNumber, o => o.Id, StringComparer.OrdinalIgnoreCase, ct);
+        var existing = await OrderNumberLookup.LoadOrderNumbersAsync(_db, companyId, ct);
         var customers = await _db.CrmCustomers.AsNoTracking()
             .Where(c => c.CompanyId == companyId && c.AccountNumber != null)
             .ToDictionaryAsync(c => c.AccountNumber!, c => c, StringComparer.OrdinalIgnoreCase, ct);
@@ -342,7 +340,11 @@ public sealed class SalesOrdersCsvImporter : EntityCsvImporterBase
 
             int? id = null;
             var action = "Create";
-            if (!string.IsNullOrWhiteSpace(number) && existing.TryGetValue(number, out var eid))
+            if (!string.IsNullOrWhiteSpace(number) && existing.Duplicates.Contains(number))
+            {
+                errors.Add($"Order '{number}' is duplicated; resolve the clash before importing.");
+            }
+            else if (!string.IsNullOrWhiteSpace(number) && existing.IdsByNumber.TryGetValue(number, out var eid))
             {
                 id = eid;
                 action = "Update";
@@ -684,4 +686,23 @@ public sealed class OpeningBalancesCsvImporter : EntityCsvImporterBase
         {
             ["LedgerCode"] = "SAMPLE-LED-002", ["OpeningBalance"] = "5000.00", ["OpeningBalanceType"] = "Debit"
         });
+}
+
+file static class OrderNumberLookup
+{
+    public static async Task<(
+        Dictionary<string, int> IdsByNumber,
+        HashSet<string> Duplicates)> LoadOrderNumbersAsync(
+        ShaunErpDbContext db, int companyId, CancellationToken ct)
+    {
+        var rows = await db.SalesOrders.AsNoTracking()
+            .Where(o => o.CompanyId == companyId)
+            .Select(o => new { o.OrderNumber, o.Id })
+            .ToListAsync(ct);
+
+        var groups = rows.GroupBy(o => o.OrderNumber, StringComparer.OrdinalIgnoreCase).ToList();
+        return (
+            groups.ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase),
+            groups.Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet(StringComparer.OrdinalIgnoreCase));
+    }
 }
