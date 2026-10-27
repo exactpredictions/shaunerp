@@ -39,9 +39,7 @@ public sealed class InvoicesCsvImporter : EntityCsvImporterBase
         var existing = await _db.Invoices.AsNoTracking()
             .Where(i => i.CompanyId == companyId)
             .ToDictionaryAsync(i => i.InvoiceNumber, i => i.Id, StringComparer.OrdinalIgnoreCase, ct);
-        var customers = await _db.CrmCustomers.AsNoTracking()
-            .Where(c => c.CompanyId == companyId && c.AccountNumber != null)
-            .ToDictionaryAsync(c => c.AccountNumber!, c => c, StringComparer.OrdinalIgnoreCase, ct);
+        var customers = await CustomerAccountLookup.LoadAsync(_db, companyId, ct);
 
         var rows = new List<CsvRowValidation>();
         var n = 1;
@@ -54,7 +52,11 @@ public sealed class InvoicesCsvImporter : EntityCsvImporterBase
             var acct = CsvValidator.Get(values, "CustomerAccountNumber");
             if (!CsvValidator.TryRequired(number, "InvoiceNumber", out var e1)) errors.Add(e1!);
             if (!CsvValidator.TryRequired(acct, "CustomerAccountNumber", out var e2)) errors.Add(e2!);
-            if (!string.IsNullOrWhiteSpace(acct) && !customers.ContainsKey(acct))
+            if (customers.IsDuplicate(acct))
+            {
+                errors.Add(CustomerAccountIndex.DuplicateError(acct));
+            }
+            else if (!string.IsNullOrWhiteSpace(acct) && !customers.TryGetUnique(acct, out _))
             {
                 errors.Add($"Customer account '{acct}' not found.");
             }
@@ -84,16 +86,15 @@ public sealed class InvoicesCsvImporter : EntityCsvImporterBase
 
     public override async Task<CsvImportResult> ApplyAsync(CsvImportPreview preview, int companyId, CancellationToken ct = default)
     {
-        var customers = await _db.CrmCustomers
-            .Where(c => c.CompanyId == companyId && c.AccountNumber != null)
-            .ToDictionaryAsync(c => c.AccountNumber!, c => c, StringComparer.OrdinalIgnoreCase, ct);
+        var customers = await CustomerAccountLookup.LoadAsync(_db, companyId, ct);
         var created = 0; var updated = 0;
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
         try
         {
             foreach (var row in preview.Rows.Where(r => r.IsValid))
             {
-                var customer = customers[CsvValidator.Get(row.Values, "CustomerAccountNumber")];
+                if (!customers.TryGetUnique(CsvValidator.Get(row.Values, "CustomerAccountNumber"), out var customer))
+                    continue;
                 CsvValidator.TryDate(CsvValidator.Get(row.Values, "InvoiceDate"), out var invDate, out _);
                 CsvValidator.TryDate(CsvValidator.Get(row.Values, "DueDate"), out var due, out _);
                 CsvValidator.TryDecimal(CsvValidator.Get(row.Values, "GrandTotal"), out var total, out _);
@@ -321,9 +322,7 @@ public sealed class SalesOrdersCsvImporter : EntityCsvImporterBase
         var existing = await _db.SalesOrders.AsNoTracking()
             .Where(o => o.CompanyId == companyId)
             .ToDictionaryAsync(o => o.OrderNumber, o => o.Id, StringComparer.OrdinalIgnoreCase, ct);
-        var customers = await _db.CrmCustomers.AsNoTracking()
-            .Where(c => c.CompanyId == companyId && c.AccountNumber != null)
-            .ToDictionaryAsync(c => c.AccountNumber!, c => c, StringComparer.OrdinalIgnoreCase, ct);
+        var customers = await CustomerAccountLookup.LoadAsync(_db, companyId, ct);
 
         var rows = new List<CsvRowValidation>();
         var n = 1;
@@ -336,7 +335,10 @@ public sealed class SalesOrdersCsvImporter : EntityCsvImporterBase
             var acct = CsvValidator.Get(values, "CustomerAccountNumber");
             if (!CsvValidator.TryRequired(number, "OrderNumber", out var e1)) errors.Add(e1!);
             if (!CsvValidator.TryRequired(acct, "CustomerAccountNumber", out var e2)) errors.Add(e2!);
-            if (!string.IsNullOrWhiteSpace(acct) && !customers.ContainsKey(acct)) errors.Add($"Customer account '{acct}' not found.");
+            if (customers.IsDuplicate(acct))
+                errors.Add(CustomerAccountIndex.DuplicateError(acct));
+            else if (!string.IsNullOrWhiteSpace(acct) && !customers.TryGetUnique(acct, out _))
+                errors.Add($"Customer account '{acct}' not found.");
             if (!CsvValidator.TryDate(CsvValidator.Get(values, "OrderDate"), out _, out var e3) && e3 is not null) errors.Add(e3);
             if (!CsvValidator.TryDecimal(CsvValidator.Get(values, "GrandTotal"), out _, out var e4) && e4 is not null) errors.Add(e4);
 
@@ -360,16 +362,15 @@ public sealed class SalesOrdersCsvImporter : EntityCsvImporterBase
 
     public override async Task<CsvImportResult> ApplyAsync(CsvImportPreview preview, int companyId, CancellationToken ct = default)
     {
-        var customers = await _db.CrmCustomers
-            .Where(c => c.CompanyId == companyId && c.AccountNumber != null)
-            .ToDictionaryAsync(c => c.AccountNumber!, c => c, StringComparer.OrdinalIgnoreCase, ct);
+        var customers = await CustomerAccountLookup.LoadAsync(_db, companyId, ct);
         var created = 0; var updated = 0;
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
         try
         {
             foreach (var row in preview.Rows.Where(r => r.IsValid))
             {
-                var customer = customers[CsvValidator.Get(row.Values, "CustomerAccountNumber")];
+                if (!customers.TryGetUnique(CsvValidator.Get(row.Values, "CustomerAccountNumber"), out var customer))
+                    continue;
                 CsvValidator.TryDate(CsvValidator.Get(row.Values, "OrderDate"), out var orderDate, out _);
                 CsvValidator.TryDecimal(CsvValidator.Get(row.Values, "GrandTotal"), out var total, out _);
                 var order = new SalesOrder

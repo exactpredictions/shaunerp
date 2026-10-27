@@ -179,9 +179,7 @@ public sealed class OpportunitiesCsvImporter : EntityCsvImporterBase
         var byName = existing.Where(x => !string.IsNullOrWhiteSpace(x.DealName))
             .GroupBy(x => x.DealName!, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
-        var customers = await _db.CrmCustomers.AsNoTracking()
-            .Where(c => c.CompanyId == companyId && c.AccountNumber != null)
-            .ToDictionaryAsync(c => c.AccountNumber!, c => c.Id, StringComparer.OrdinalIgnoreCase, ct);
+        var customers = await CustomerAccountLookup.LoadAsync(_db, companyId, ct);
 
         var rows = new List<CsvRowValidation>();
         var n = 1;
@@ -196,7 +194,11 @@ public sealed class OpportunitiesCsvImporter : EntityCsvImporterBase
             if (!CsvValidator.TryDecimal(CsvValidator.Get(values, "Probability"), out _, out var e3) && e3 is not null) errors.Add(e3);
             if (!CsvValidator.TryDate(CsvValidator.Get(values, "ExpectedCloseDate"), out _, out var e4) && e4 is not null) errors.Add(e4);
             var acct = CsvValidator.Get(values, "CustomerAccountNumber");
-            if (!string.IsNullOrWhiteSpace(acct) && !customers.ContainsKey(acct))
+            if (customers.IsDuplicate(acct))
+            {
+                errors.Add(CustomerAccountIndex.DuplicateError(acct));
+            }
+            else if (!string.IsNullOrWhiteSpace(acct) && !customers.TryGetUnique(acct, out _))
             {
                 errors.Add($"Customer account '{acct}' not found.");
             }
@@ -221,9 +223,7 @@ public sealed class OpportunitiesCsvImporter : EntityCsvImporterBase
 
     public override async Task<CsvImportResult> ApplyAsync(CsvImportPreview preview, int companyId, CancellationToken ct = default)
     {
-        var customers = await _db.CrmCustomers
-            .Where(c => c.CompanyId == companyId && c.AccountNumber != null)
-            .ToDictionaryAsync(c => c.AccountNumber!, c => c.Id, StringComparer.OrdinalIgnoreCase, ct);
+        var customers = await CustomerAccountLookup.LoadAsync(_db, companyId, ct);
         var created = 0; var updated = 0;
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
         try
@@ -235,9 +235,9 @@ public sealed class OpportunitiesCsvImporter : EntityCsvImporterBase
                 CsvValidator.TryDate(CsvValidator.Get(row.Values, "ExpectedCloseDate"), out var close, out _);
                 int? customerId = null;
                 var acct = CsvValidator.Get(row.Values, "CustomerAccountNumber");
-                if (!string.IsNullOrWhiteSpace(acct) && customers.TryGetValue(acct, out var cid))
+                if (customers.TryGetUnique(acct, out var matchedCustomer))
                 {
-                    customerId = cid;
+                    customerId = matchedCustomer.Id;
                 }
 
                 var deal = new Opportunity

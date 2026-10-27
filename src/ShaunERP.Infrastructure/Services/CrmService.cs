@@ -955,6 +955,9 @@ public partial class CrmService : ICrmService
         customer.CreatedDate = DateTime.UtcNow;
         // Customer remains the commercial bill-to master. PartyId is optional identity linkage only.
         // Do not invent a new Party from company name alone — that is org territory (CrmAccount).
+        customer.AccountNumber = NormalizeAccountNumber(customer.AccountNumber);
+        await EnsureUniqueAccountNumberAsync(customer.AccountNumber, exceptCustomerId: null, ct);
+
         if (customer.PartyId is null &&
             (!string.IsNullOrWhiteSpace(customer.Email) || !string.IsNullOrWhiteSpace(customer.PhoneNumber)))
         {
@@ -992,7 +995,9 @@ public partial class CrmService : ICrmService
         row.CreditLimit = update.CreditLimit;
         row.TaxId = update.TaxId;
         row.CustomerOwner = update.CustomerOwner;
-        row.AccountNumber = update.AccountNumber;
+        var accountNumber = NormalizeAccountNumber(update.AccountNumber);
+        await EnsureUniqueAccountNumberAsync(accountNumber, exceptCustomerId: row.Id, ct);
+        row.AccountNumber = accountNumber;
         row.Industry = update.Industry;
         row.Website = update.Website;
         row.CustomerType = update.CustomerType;
@@ -1231,6 +1236,25 @@ public partial class CrmService : ICrmService
 
     private int RequireCompanyId()
         => _tenant.CompanyId ?? throw new InvalidOperationException("Tenant context is required.");
+
+    private static string? NormalizeAccountNumber(string? accountNumber) =>
+        string.IsNullOrWhiteSpace(accountNumber) ? null : accountNumber.Trim();
+
+    private async Task EnsureUniqueAccountNumberAsync(
+        string? accountNumber, int? exceptCustomerId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(accountNumber))
+            return;
+
+        var normalized = accountNumber.Trim().ToLower();
+        var exceptId = exceptCustomerId ?? 0;
+        var taken = await TenantFilter(_db.CrmCustomers)
+            .AnyAsync(c => c.Id != exceptId
+                           && c.AccountNumber != null
+                           && c.AccountNumber.ToLower() == normalized, ct);
+        if (taken)
+            throw new InvalidOperationException($"Account number '{accountNumber.Trim()}' is already used.");
+    }
 
     private IQueryable<T> TenantFilter<T>(IQueryable<T> query) where T : class
     {
