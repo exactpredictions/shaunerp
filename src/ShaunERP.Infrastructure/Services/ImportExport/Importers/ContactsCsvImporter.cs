@@ -42,9 +42,7 @@ public sealed class ContactsCsvImporter : EntityCsvImporterBase
             .GroupBy(c => c.Email!, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
 
-        var customers = await _db.CrmCustomers.AsNoTracking()
-            .Where(c => c.CompanyId == companyId && c.AccountNumber != null)
-            .ToDictionaryAsync(c => c.AccountNumber!, c => c.Id, StringComparer.OrdinalIgnoreCase, ct);
+        var customers = await CustomerAccountLookup.LoadAsync(_db, companyId, ct);
 
         var rows = new List<CsvRowValidation>();
         var n = 1;
@@ -60,7 +58,11 @@ public sealed class ContactsCsvImporter : EntityCsvImporterBase
             if (!CsvValidator.TryEmail(email, out var e4) && e4 is not null) errors.Add(e4);
 
             var account = CsvValidator.Get(values, "AccountNumber");
-            if (!string.IsNullOrWhiteSpace(account) && !customers.ContainsKey(account))
+            if (customers.IsDuplicate(account))
+            {
+                errors.Add(CustomerAccountIndex.DuplicateError(account));
+            }
+            else if (!string.IsNullOrWhiteSpace(account) && !customers.TryGetUnique(account, out _))
             {
                 warnings.Add($"Customer account '{account}' not found; contact will be created without customer link.");
             }
@@ -91,9 +93,7 @@ public sealed class ContactsCsvImporter : EntityCsvImporterBase
 
     public override async Task<CsvImportResult> ApplyAsync(CsvImportPreview preview, int companyId, CancellationToken ct = default)
     {
-        var customers = await _db.CrmCustomers
-            .Where(c => c.CompanyId == companyId && c.AccountNumber != null)
-            .ToDictionaryAsync(c => c.AccountNumber!, c => c.Id, StringComparer.OrdinalIgnoreCase, ct);
+        var customers = await CustomerAccountLookup.LoadAsync(_db, companyId, ct);
 
         var created = 0;
         var updated = 0;
@@ -104,9 +104,9 @@ public sealed class ContactsCsvImporter : EntityCsvImporterBase
             {
                 int? customerId = null;
                 var account = CsvValidator.Get(row.Values, "AccountNumber");
-                if (!string.IsNullOrWhiteSpace(account) && customers.TryGetValue(account, out var cid))
+                if (customers.TryGetUnique(account, out var matchedCustomer))
                 {
-                    customerId = cid;
+                    customerId = matchedCustomer.Id;
                 }
 
                 var contact = new Contact

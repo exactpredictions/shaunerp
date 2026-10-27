@@ -39,13 +39,8 @@ public sealed class CustomersCsvImporter : EntityCsvImporterBase
 
     public override async Task<CsvImportPreview> PreviewAsync(CsvParseResult parsed, int companyId, CancellationToken ct = default)
     {
-        var existing = await _db.CrmCustomers
-            .Where(c => c.CompanyId == companyId && c.AccountNumber != null)
-            .Select(c => new { c.Id, c.AccountNumber })
-            .ToListAsync(ct);
-        var byAccount = existing
-            .Where(x => !string.IsNullOrWhiteSpace(x.AccountNumber))
-            .ToDictionary(x => x.AccountNumber!, x => x.Id, StringComparer.OrdinalIgnoreCase);
+        var existing = await CustomerAccountLookup.LoadAsync(_db, companyId, ct);
+        var seenInFile = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         var rows = new List<CsvRowValidation>();
         var rowNum = 1;
@@ -63,10 +58,19 @@ public sealed class CustomersCsvImporter : EntityCsvImporterBase
 
             int? existingId = null;
             var action = "Create";
-            if (!string.IsNullOrWhiteSpace(account) && byAccount.TryGetValue(account, out var id))
+            if (existing.IsDuplicate(account))
             {
-                existingId = id;
+                errors.Add(CustomerAccountIndex.DuplicateError(account));
+            }
+            else if (existing.TryGetUnique(account, out var matched))
+            {
+                existingId = matched.Id;
                 action = "Update";
+            }
+
+            if (!string.IsNullOrWhiteSpace(account) && !seenInFile.Add(account))
+            {
+                errors.Add("Duplicate account number in import file.");
             }
 
             rows.Add(new CsvRowValidation
