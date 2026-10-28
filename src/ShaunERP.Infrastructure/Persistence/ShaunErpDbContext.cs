@@ -431,7 +431,8 @@ public class ShaunErpDbContext : DbContext
             .OnDelete(DeleteBehavior.SetNull);
 
         modelBuilder.Entity<CrmProduct>()
-            .HasIndex(x => new { x.CompanyId, x.ProductCode });
+            .HasIndex(x => new { x.CompanyId, x.ProductCode })
+            .IsUnique();
 
         modelBuilder.Entity<Quote>()
             .HasIndex(x => new { x.CompanyId, x.QuoteNumber });
