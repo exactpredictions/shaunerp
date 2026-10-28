@@ -38,7 +38,13 @@ public sealed class ProductsCsvImporter : EntityCsvImporterBase
     {
         var existing = await _db.CrmProducts.AsNoTracking()
             .Where(p => p.CompanyId == companyId)
-            .ToDictionaryAsync(p => p.ProductCode, p => p.Id, StringComparer.OrdinalIgnoreCase, ct);
+            .Select(p => new { p.Id, p.ProductCode })
+            .ToListAsync(ct);
+        var byCode = existing
+            .Where(p => !string.IsNullOrWhiteSpace(p.ProductCode))
+            .GroupBy(p => p.ProductCode, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+        var seenInFile = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var rows = new List<CsvRowValidation>();
         var n = 1;
         foreach (var values in parsed.Rows)
@@ -52,10 +58,15 @@ public sealed class ProductsCsvImporter : EntityCsvImporterBase
             if (!CsvValidator.TryDecimal(CsvValidator.Get(values, "TaxRate"), out _, out var e4) && e4 is not null) errors.Add(e4);
             int? id = null;
             var action = "Create";
-            if (!string.IsNullOrWhiteSpace(code) && existing.TryGetValue(code, out var eid))
+            if (!string.IsNullOrWhiteSpace(code) && byCode.TryGetValue(code, out var eid))
             {
                 id = eid;
                 action = "Update";
+            }
+            else if (!string.IsNullOrWhiteSpace(code) && !seenInFile.Add(code))
+            {
+                action = "Skip";
+                errors.Add("Duplicate product code in import file.");
             }
 
             rows.Add(new CsvRowValidation

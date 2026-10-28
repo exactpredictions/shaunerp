@@ -163,6 +163,8 @@ public partial class CrmService
         product.Id = 0;
         product.CompanyId = RequireCompanyId();
         product.CreatedDate = DateTime.UtcNow;
+        product.ProductCode = (product.ProductCode ?? string.Empty).Trim();
+        await EnsureUniqueProductCodeAsync(product.ProductCode, excludeId: null, ct);
         if (string.IsNullOrWhiteSpace(product.CurrencyCode)) product.CurrencyCode = "USD";
         if (string.IsNullOrWhiteSpace(product.UnitOfMeasure)) product.UnitOfMeasure = "Each";
         _db.CrmProducts.Add(product);
@@ -176,7 +178,8 @@ public partial class CrmService
         var row = await FindOwnedAsync(_db.CrmProducts, id, ct);
         if (row is null) return null;
         row.CompanyId = RequireCompanyId();
-        row.ProductCode = update.ProductCode;
+        row.ProductCode = (update.ProductCode ?? string.Empty).Trim();
+        await EnsureUniqueProductCodeAsync(row.ProductCode, excludeId: id, ct);
         row.Name = update.Name;
         row.ProductFamily = update.ProductFamily;
         row.Category = update.Category;
@@ -481,6 +484,19 @@ public partial class CrmService
         _db.CrmNotes.Remove(row);
         await _db.SaveChangesAsync(ct);
         return true;
+    }
+
+    private async Task EnsureUniqueProductCodeAsync(string code, int? excludeId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+            throw new InvalidOperationException("Product code is required.");
+
+        var normalized = code.Trim().ToLower();
+        var duplicate = await TenantFilter(_db.CrmProducts)
+            .AnyAsync(p => p.ProductCode.ToLower() == normalized
+                           && (excludeId == null || p.Id != excludeId), ct);
+        if (duplicate)
+            throw new InvalidOperationException($"Product code '{code.Trim()}' already exists.");
     }
 
     private static decimal ComputeLineTotal(QuoteLine line)
