@@ -68,6 +68,7 @@ public sealed class LeadsCsvImporter : EntityCsvImporterBase
             {
                 id = existingId;
                 action = "Update";
+                warnings.Add("CSV has no CampaignId/IsQualified/address columns — existing qualification, campaign, and identity fields will be kept.");
             }
             else if (!string.IsNullOrWhiteSpace(email) && !seenInFile.Add(email))
             {
@@ -100,22 +101,25 @@ public sealed class LeadsCsvImporter : EntityCsvImporterBase
     {
         var created = 0;
         var updated = 0;
-        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+        var tx = _db.Database.IsRelational() ? await _db.Database.BeginTransactionAsync(ct) : null;
         try
         {
             var batch = 0;
             foreach (var row in preview.Rows.Where(r => r.IsValid))
             {
-                var map = Map(row.Values, companyId);
                 if (row.ExistingId is int id)
                 {
-                    map.Id = id;
-                    await _crm.UpdateLeadAsync(id, map, ct);
+                    var existing = await _crm.GetLeadAsync(id, ct);
+                    if (existing is null)
+                        continue;
+
+                    ApplyCsvFields(existing, row.Values, forCreate: false);
+                    await _crm.UpdateLeadAsync(id, existing, ct);
                     updated++;
                 }
                 else
                 {
-                    await _crm.CreateLeadAsync(map, ct);
+                    await _crm.CreateLeadAsync(Map(row.Values, companyId), ct);
                     created++;
                 }
 
@@ -127,7 +131,8 @@ public sealed class LeadsCsvImporter : EntityCsvImporterBase
             }
 
             await _db.SaveChangesAsync(ct);
-            await tx.CommitAsync(ct);
+            if (tx is not null)
+                await tx.CommitAsync(ct);
             return new CsvImportResult
             {
                 EntityKey = EntityKey,
@@ -139,8 +144,14 @@ public sealed class LeadsCsvImporter : EntityCsvImporterBase
         }
         catch (Exception ex)
         {
-            await tx.RollbackAsync(ct);
+            if (tx is not null)
+                await tx.RollbackAsync(ct);
             return new CsvImportResult { EntityKey = EntityKey, Success = false, Messages = [ex.Message] };
+        }
+        finally
+        {
+            if (tx is not null)
+                await tx.DisposeAsync();
         }
     }
 
@@ -196,27 +207,71 @@ public sealed class LeadsCsvImporter : EntityCsvImporterBase
 
     private static Lead Map(IReadOnlyDictionary<string, string> v, int companyId)
     {
-        var last = Null(CsvValidator.Get(v, "LastName")) ?? "-";
-        var phone = Null(CsvValidator.Get(v, "Phone"));
+        var lead = new Lead { CompanyId = companyId };
+        ApplyCsvFields(lead, v, forCreate: true);
+        return lead;
+    }
+
+    /// <summary>
+    /// CSV columns are a subset of Lead. Updates must not pass a sparse Lead into
+    /// UpdateLeadAsync — that copies CampaignId/IsQualified/address/score as defaults
+    /// and wipes qualification plus campaign attribution on export/reimport.
+    /// </summary>
+    private static void ApplyCsvFields(Lead lead, IReadOnlyDictionary<string, string> v, bool forCreate)
+    {
+        lead.Email = CsvValidator.Get(v, "Email");
+        lead.FirstName = CsvValidator.Get(v, "FirstName");
+
+        var last = Null(CsvValidator.Get(v, "LastName"));
+        if (last is not null || forCreate)
+            lead.LastName = last ?? "-";
+
+        var companyName = Null(CsvValidator.Get(v, "CompanyName"));
+        if (companyName is not null || forCreate)
+            lead.CompanyName = companyName;
+
         var mobile = Null(CsvValidator.Get(v, "Mobile"));
-        return new Lead
-        {
-            CompanyId = companyId,
-            Email = CsvValidator.Get(v, "Email"),
-            FirstName = CsvValidator.Get(v, "FirstName"),
-            LastName = last,
-            CompanyName = Null(CsvValidator.Get(v, "CompanyName")),
-            Phone = phone ?? mobile,
-            Mobile = mobile,
-            LeadSource = Null(CsvValidator.Get(v, "LeadSource")),
-            LeadStatus = Null(CsvValidator.Get(v, "LeadStatus")) ?? "New",
-            Industry = Null(CsvValidator.Get(v, "Industry")),
-            LeadOwner = Null(CsvValidator.Get(v, "LeadOwner")),
-            City = Null(CsvValidator.Get(v, "City")),
-            State = Null(CsvValidator.Get(v, "State")),
-            Country = Null(CsvValidator.Get(v, "Country")),
-            Tags = Null(CsvValidator.Get(v, "Tags")) ?? "crm-import"
-        };
+        var phone = Null(CsvValidator.Get(v, "Phone"));
+        if (mobile is not null || forCreate)
+            lead.Mobile = mobile;
+        if (phone is not null || forCreate)
+            lead.Phone = phone ?? (forCreate ? mobile : lead.Phone);
+
+        var source = Null(CsvValidator.Get(v, "LeadSource"));
+        if (source is not null || forCreate)
+            lead.LeadSource = source;
+
+        var status = Null(CsvValidator.Get(v, "LeadStatus"));
+        if (status is not null)
+            lead.LeadStatus = status;
+        else if (forCreate)
+            lead.LeadStatus = "New";
+
+        var industry = Null(CsvValidator.Get(v, "Industry"));
+        if (industry is not null || forCreate)
+            lead.Industry = industry;
+
+        var owner = Null(CsvValidator.Get(v, "LeadOwner"));
+        if (owner is not null || forCreate)
+            lead.LeadOwner = owner;
+
+        var city = Null(CsvValidator.Get(v, "City"));
+        if (city is not null || forCreate)
+            lead.City = city;
+
+        var state = Null(CsvValidator.Get(v, "State"));
+        if (state is not null || forCreate)
+            lead.State = state;
+
+        var country = Null(CsvValidator.Get(v, "Country"));
+        if (country is not null || forCreate)
+            lead.Country = country;
+
+        var tags = Null(CsvValidator.Get(v, "Tags"));
+        if (tags is not null)
+            lead.Tags = tags;
+        else if (forCreate)
+            lead.Tags = "crm-import";
     }
 
     private static string? Null(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim();
