@@ -52,16 +52,18 @@ public sealed class ProductsCsvImporter : EntityCsvImporterBase
             if (!CsvValidator.TryDecimal(CsvValidator.Get(values, "TaxRate"), out _, out var e4) && e4 is not null) errors.Add(e4);
             int? id = null;
             var action = "Create";
+            var warnings = new List<string>();
             if (!string.IsNullOrWhiteSpace(code) && existing.TryGetValue(code, out var eid))
             {
                 id = eid;
                 action = "Update";
+                warnings.Add("CSV has no IsActive column — existing active/inactive status will be kept.");
             }
 
             rows.Add(new CsvRowValidation
             {
                 RowNumber = n, IsValid = errors.Count == 0, Action = action, Values = values,
-                Errors = errors, MatchKey = code, ExistingId = id
+                Errors = errors, Warnings = warnings, MatchKey = code, ExistingId = id
             });
         }
 
@@ -71,47 +73,42 @@ public sealed class ProductsCsvImporter : EntityCsvImporterBase
     public override async Task<CsvImportResult> ApplyAsync(CsvImportPreview preview, int companyId, CancellationToken ct = default)
     {
         var created = 0; var updated = 0;
-        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+        var tx = _db.Database.IsRelational() ? await _db.Database.BeginTransactionAsync(ct) : null;
         try
         {
             foreach (var row in preview.Rows.Where(r => r.IsValid))
             {
-                CsvValidator.TryDecimal(CsvValidator.Get(row.Values, "UnitPrice"), out var price, out _);
-                CsvValidator.TryDecimal(CsvValidator.Get(row.Values, "TaxRate"), out var tax, out _);
-                var product = new CrmProduct
-                {
-                    CompanyId = companyId,
-                    ProductCode = CsvValidator.Get(row.Values, "ProductCode"),
-                    Name = CsvValidator.Get(row.Values, "Name"),
-                    UnitPrice = price ?? 0,
-                    CurrencyCode = Null(CsvValidator.Get(row.Values, "CurrencyCode")) ?? "INR",
-                    Category = Null(CsvValidator.Get(row.Values, "Category")),
-                    ProductFamily = Null(CsvValidator.Get(row.Values, "ProductFamily")),
-                    UnitOfMeasure = Null(CsvValidator.Get(row.Values, "UnitOfMeasure")) ?? "Each",
-                    TaxRate = tax,
-                    Description = Null(CsvValidator.Get(row.Values, "Description")),
-                    IsActive = true
-                };
                 if (row.ExistingId is int id)
                 {
-                    product.Id = id;
-                    await _crm.UpdateProductAsync(id, product, ct);
+                    var existing = await _crm.GetProductAsync(id, ct);
+                    if (existing is null)
+                        continue;
+
+                    ApplyCsvFields(existing, row.Values, forCreate: false);
+                    await _crm.UpdateProductAsync(id, existing, ct);
                     updated++;
                 }
                 else
                 {
-                    await _crm.CreateProductAsync(product, ct);
+                    await _crm.CreateProductAsync(Map(row.Values, companyId), ct);
                     created++;
                 }
             }
 
-            await tx.CommitAsync(ct);
+            if (tx is not null)
+                await tx.CommitAsync(ct);
             return new CsvImportResult { EntityKey = EntityKey, Success = true, Created = created, Updated = updated, Skipped = preview.InvalidCount };
         }
         catch (Exception ex)
         {
-            await tx.RollbackAsync(ct);
+            if (tx is not null)
+                await tx.RollbackAsync(ct);
             return new CsvImportResult { EntityKey = EntityKey, Success = false, Messages = [ex.Message] };
+        }
+        finally
+        {
+            if (tx is not null)
+                await tx.DisposeAsync();
         }
     }
 
@@ -138,6 +135,63 @@ public sealed class ProductsCsvImporter : EntityCsvImporterBase
             ["ProductCode"] = "SAMPLE-PRD-002", ["Name"] = "SAMPLE Product B", ["UnitPrice"] = "1499.00",
             ["CurrencyCode"] = "INR", ["Category"] = "Goods", ["TaxRate"] = "18"
         });
+
+    private static CrmProduct Map(IReadOnlyDictionary<string, string> v, int companyId)
+    {
+        var product = new CrmProduct { CompanyId = companyId };
+        ApplyCsvFields(product, v, forCreate: true);
+        return product;
+    }
+
+    /// <summary>
+    /// CSV columns are a subset of CrmProduct. Updates must not pass a sparse product into
+    /// UpdateProductAsync — that copies IsActive=true (the CSV has no Active column) and
+    /// reactivates discontinued SKUs on export/reimport, putting them back on invoice pickers.
+    /// </summary>
+    private static void ApplyCsvFields(CrmProduct product, IReadOnlyDictionary<string, string> v, bool forCreate)
+    {
+        product.ProductCode = CsvValidator.Get(v, "ProductCode");
+        product.Name = CsvValidator.Get(v, "Name");
+
+        CsvValidator.TryDecimal(CsvValidator.Get(v, "UnitPrice"), out var price, out _);
+        if (price is not null)
+            product.UnitPrice = price.Value;
+        else if (forCreate)
+            product.UnitPrice = 0;
+
+        var currency = Null(CsvValidator.Get(v, "CurrencyCode"));
+        if (currency is not null)
+            product.CurrencyCode = currency;
+        else if (forCreate)
+            product.CurrencyCode = "INR";
+
+        var category = Null(CsvValidator.Get(v, "Category"));
+        if (category is not null || forCreate)
+            product.Category = category;
+
+        var family = Null(CsvValidator.Get(v, "ProductFamily"));
+        if (family is not null || forCreate)
+            product.ProductFamily = family;
+
+        var uom = Null(CsvValidator.Get(v, "UnitOfMeasure"));
+        if (uom is not null)
+            product.UnitOfMeasure = uom;
+        else if (forCreate)
+            product.UnitOfMeasure = "Each";
+
+        CsvValidator.TryDecimal(CsvValidator.Get(v, "TaxRate"), out var tax, out _);
+        if (tax is not null)
+            product.TaxRate = tax;
+        else if (forCreate)
+            product.TaxRate = tax;
+
+        var description = Null(CsvValidator.Get(v, "Description"));
+        if (description is not null || forCreate)
+            product.Description = description;
+
+        if (forCreate)
+            product.IsActive = true;
+    }
 
     private static string? Null(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim();
 }
