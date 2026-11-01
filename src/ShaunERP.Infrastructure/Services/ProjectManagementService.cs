@@ -341,6 +341,7 @@ public sealed partial class ProjectManagementService : IProjectManagementService
         project.ProjectCode = string.IsNullOrWhiteSpace(project.ProjectCode)
             ? await NextNumberAsync(companyId, ProjectSequenceKeys.Project, ct)
             : project.ProjectCode.Trim();
+        await EnsureUniqueProjectCodeAsync(project.ProjectCode, excludeId: null, ct);
 
         await ResolveCustomerAsync(project, ct);
         project.OwnerUserId ??= _tenant.UserId;
@@ -402,7 +403,10 @@ public sealed partial class ProjectManagementService : IProjectManagementService
         }
 
         if (!string.IsNullOrWhiteSpace(update.ProjectCode))
+        {
             row.ProjectCode = update.ProjectCode.Trim();
+            await EnsureUniqueProjectCodeAsync(row.ProjectCode, excludeId: row.Id, ct);
+        }
 
         Validate(row);
         await ResolveCustomerAsync(row, ct);
@@ -951,10 +955,36 @@ public sealed partial class ProjectManagementService : IProjectManagementService
             _db.ProjectNumberSequences.Add(sequence);
         }
 
-        var value = sequence.NextValue;
-        sequence.NextValue = value + 1;
+        string candidate;
+        do
+        {
+            var value = sequence.NextValue;
+            sequence.NextValue = value + 1;
+            candidate = $"{normalizedKey}-{year}-{value:000000}";
+        }
+        while (normalizedKey == ProjectSequenceKeys.Project
+               && await ProjectCodeTakenAsync(companyId, candidate, excludeId: null, ct));
+
         await _db.SaveChangesAsync(ct);
-        return $"{normalizedKey}-{year}-{value:000000}";
+        return candidate;
+    }
+
+    private async Task EnsureUniqueProjectCodeAsync(string code, int? excludeId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+            throw new InvalidOperationException("Project code is required.");
+        if (await ProjectCodeTakenAsync(RequireCompanyId(), code, excludeId, ct))
+            throw new InvalidOperationException($"Project code '{code.Trim()}' already exists.");
+    }
+
+    private Task<bool> ProjectCodeTakenAsync(int companyId, string code, int? excludeId, CancellationToken ct)
+    {
+        var normalized = code.Trim().ToLower();
+        return _db.Projects.AnyAsync(
+            p => p.CompanyId == companyId
+                 && p.ProjectCode.ToLower() == normalized
+                 && (excludeId == null || p.Id != excludeId),
+            ct);
     }
 
     // ——————————————————————————— Shared helpers ———————————————————————————

@@ -37,7 +37,13 @@ public sealed class ProjectsCsvImporter : EntityCsvImporterBase
     {
         var existing = await _db.Projects.AsNoTracking()
             .Where(p => p.CompanyId == companyId)
-            .ToDictionaryAsync(p => p.ProjectCode, p => p.Id, StringComparer.OrdinalIgnoreCase, ct);
+            .Select(p => new { p.Id, p.ProjectCode })
+            .ToListAsync(ct);
+        var byCode = existing
+            .Where(p => !string.IsNullOrWhiteSpace(p.ProjectCode))
+            .GroupBy(p => p.ProjectCode, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+        var seenInFile = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var customers = await _db.CrmCustomers.AsNoTracking()
             .Where(c => c.CompanyId == companyId && c.CompanyName != null && c.CompanyName != "")
             .Select(c => c.CompanyName!)
@@ -70,10 +76,15 @@ public sealed class ProjectsCsvImporter : EntityCsvImporterBase
 
             int? id = null;
             var action = "Create";
-            if (!string.IsNullOrWhiteSpace(code) && existing.TryGetValue(code, out var eid))
+            if (!string.IsNullOrWhiteSpace(code) && byCode.TryGetValue(code, out var eid))
             {
                 id = eid;
                 action = "Update";
+            }
+            else if (!string.IsNullOrWhiteSpace(code) && !seenInFile.Add(code))
+            {
+                action = "Skip";
+                errors.Add("Duplicate project code in import file.");
             }
 
             rows.Add(new CsvRowValidation
@@ -295,9 +306,14 @@ public sealed class ProjectTasksCsvImporter : EntityCsvImporterBase
 
     public override async Task<CsvImportPreview> PreviewAsync(CsvParseResult parsed, int companyId, CancellationToken ct = default)
     {
-        var projects = await _db.Projects.AsNoTracking()
+        var projectRows = await _db.Projects.AsNoTracking()
             .Where(p => p.CompanyId == companyId)
-            .ToDictionaryAsync(p => p.ProjectCode, p => p.Id, StringComparer.OrdinalIgnoreCase, ct);
+            .Select(p => new { p.Id, p.ProjectCode })
+            .ToListAsync(ct);
+        var projects = projectRows
+            .Where(p => !string.IsNullOrWhiteSpace(p.ProjectCode))
+            .GroupBy(p => p.ProjectCode, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
 
         var tasks = await _db.ProjectTasks.AsNoTracking()
             .Where(t => t.CompanyId == companyId)
@@ -422,9 +438,13 @@ public sealed class ProjectTasksCsvImporter : EntityCsvImporterBase
 
     public override async Task<CsvImportResult> ApplyAsync(CsvImportPreview preview, int companyId, CancellationToken ct = default)
     {
-        var projects = await _db.Projects
+        var projectRows = await _db.Projects
             .Where(p => p.CompanyId == companyId)
-            .ToDictionaryAsync(p => p.ProjectCode, p => p, StringComparer.OrdinalIgnoreCase, ct);
+            .ToListAsync(ct);
+        var projects = projectRows
+            .Where(p => !string.IsNullOrWhiteSpace(p.ProjectCode))
+            .GroupBy(p => p.ProjectCode, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
         var phases = await _db.ProjectPhases
             .Where(p => p.CompanyId == companyId)
