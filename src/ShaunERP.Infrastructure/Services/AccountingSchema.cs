@@ -356,6 +356,7 @@ internal static class AccountingSchema
         """CREATE UNIQUE INDEX IF NOT EXISTS "IX_VoucherTypes_CompanyId_Code" ON "VoucherTypes" ("CompanyId", "Code");""",
         """CREATE UNIQUE INDEX IF NOT EXISTS "IX_AccountingVouchers_CompanyId_VoucherNumber" ON "AccountingVouchers" ("CompanyId", "VoucherNumber");""",
         """CREATE INDEX IF NOT EXISTS "IX_AccountingVouchers_CompanyId_VoucherDate" ON "AccountingVouchers" ("CompanyId", "VoucherDate");""",
-        """CREATE INDEX IF NOT EXISTS "IX_AccountingVoucherLines_CompanyId_LedgerId" ON "AccountingVoucherLines" ("CompanyId", "LedgerId");"""
+        """CREATE INDEX IF NOT EXISTS "IX_AccountingVoucherLines_CompanyId_LedgerId" ON "AccountingVoucherLines" ("CompanyId", "LedgerId");""",
+        """CREATE UNIQUE INDEX IF NOT EXISTS "IX_InventoryItems_CompanyId_LowerItemCode" ON "InventoryItems" ("CompanyId", lower("ItemCode"));"""
     ];
 }
