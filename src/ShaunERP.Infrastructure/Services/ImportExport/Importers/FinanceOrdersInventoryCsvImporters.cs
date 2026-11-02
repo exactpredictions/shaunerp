@@ -453,7 +453,17 @@ public sealed class InventoryItemsCsvImporter : EntityCsvImporterBase
     {
         var existing = await _db.InventoryItems.AsNoTracking()
             .Where(i => i.CompanyId == companyId)
-            .ToDictionaryAsync(i => i.ItemCode, i => i.Id, StringComparer.OrdinalIgnoreCase, ct);
+            .Select(i => new { i.Id, i.ItemCode })
+            .ToListAsync(ct);
+        // Case-insensitive: PostgreSQL unique indexes are case-sensitive, so ITEM-001 and
+        // item-001 can both exist. ToDictionaryAsync(OrdinalIgnoreCase) then throws and
+        // inventory import cannot run.
+        var byCode = existing
+            .Where(x => !string.IsNullOrWhiteSpace(x.ItemCode))
+            .GroupBy(x => x.ItemCode, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+
+        var seenInFile = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var rows = new List<CsvRowValidation>();
         var n = 1;
         foreach (var values in parsed.Rows)
@@ -463,12 +473,21 @@ public sealed class InventoryItemsCsvImporter : EntityCsvImporterBase
             var code = CsvValidator.Get(values, "ItemCode");
             if (!CsvValidator.TryRequired(code, "ItemCode", out var e1)) errors.Add(e1!);
             if (!CsvValidator.TryRequired(CsvValidator.Get(values, "ItemName"), "ItemName", out var e2)) errors.Add(e2!);
+
             int? id = null;
             var action = "Create";
-            if (!string.IsNullOrWhiteSpace(code) && existing.TryGetValue(code, out var eid))
+            if (!string.IsNullOrWhiteSpace(code) && byCode.TryGetValue(code, out var eid))
             {
                 id = eid;
                 action = "Update";
+            }
+
+            if (!string.IsNullOrWhiteSpace(code))
+            {
+                if (seenInFile.TryGetValue(code, out var firstRow))
+                    errors.Add($"Item code '{code}' is duplicated in this file (first seen on row {firstRow}).");
+                else
+                    seenInFile[code] = n;
             }
 
             rows.Add(new CsvRowValidation
@@ -483,12 +502,15 @@ public sealed class InventoryItemsCsvImporter : EntityCsvImporterBase
 
     public override async Task<CsvImportResult> ApplyAsync(CsvImportPreview preview, int companyId, CancellationToken ct = default)
     {
-        var created = 0; var updated = 0;
+        var created = 0; var updated = 0; var failed = 0;
+        var messages = new List<string>();
+        var batchCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
         try
         {
             foreach (var row in preview.Rows.Where(r => r.IsValid))
             {
+                var code = CsvValidator.Get(row.Values, "ItemCode");
                 if (row.ExistingId is int id)
                 {
                     var item = await _db.InventoryItems.FirstAsync(i => i.Id == id && i.CompanyId == companyId, ct);
@@ -496,14 +518,24 @@ public sealed class InventoryItemsCsvImporter : EntityCsvImporterBase
                     item.ItemType = Null(CsvValidator.Get(row.Values, "ItemType")) ?? "Goods";
                     item.HsnCode = Null(CsvValidator.Get(row.Values, "HsnCode"));
                     item.IsInventoryItem = Bool(CsvValidator.Get(row.Values, "IsInventoryItem"), true);
+                    batchCodes.Add(item.ItemCode);
                     updated++;
                 }
                 else
                 {
+                    if (!batchCodes.Add(code) ||
+                        await _db.InventoryItems.AnyAsync(
+                            i => i.CompanyId == companyId && i.ItemCode.ToLower() == code.ToLower(), ct))
+                    {
+                        failed++;
+                        messages.Add($"Row {row.RowNumber}: item code '{code}' already exists.");
+                        continue;
+                    }
+
                     _db.InventoryItems.Add(new InventoryItem
                     {
                         CompanyId = companyId,
-                        ItemCode = CsvValidator.Get(row.Values, "ItemCode"),
+                        ItemCode = code,
                         ItemName = CsvValidator.Get(row.Values, "ItemName"),
                         ItemType = Null(CsvValidator.Get(row.Values, "ItemType")) ?? "Goods",
                         HsnCode = Null(CsvValidator.Get(row.Values, "HsnCode")),
@@ -516,7 +548,16 @@ public sealed class InventoryItemsCsvImporter : EntityCsvImporterBase
 
             await _db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
-            return new CsvImportResult { EntityKey = EntityKey, Success = true, Created = created, Updated = updated, Skipped = preview.InvalidCount };
+            return new CsvImportResult
+            {
+                EntityKey = EntityKey,
+                Success = failed == 0,
+                Created = created,
+                Updated = updated,
+                Failed = failed,
+                Skipped = preview.InvalidCount,
+                Messages = messages
+            };
         }
         catch (Exception ex)
         {
