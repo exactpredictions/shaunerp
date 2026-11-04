@@ -158,7 +158,8 @@ public class UserManagementService : IUserManagementService
             return (false, "Username, email and password are required.", null);
         }
 
-        if (await _db.Users.AnyAsync(u => u.Username == username || u.Email == email, ct))
+        if (await _db.Users.AnyAsync(
+                u => u.Username.ToLower() == username.ToLower() || u.Email.ToLower() == email, ct))
         {
             return (false, "Username or email already exists.", null);
         }
