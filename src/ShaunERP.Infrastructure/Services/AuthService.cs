@@ -47,8 +47,10 @@ public class AuthService : IAuthService
 
     public async Task<AuthResult> RegisterAsync(RegisterRequest request, CancellationToken ct = default)
     {
+        var username = request.Username.Trim();
+        var email = request.Email.Trim().ToLowerInvariant();
         var exists = await _db.Users.AnyAsync(
-            u => u.Username == request.Username || u.Email == request.Email, ct);
+            u => u.Username.ToLower() == username.ToLower() || u.Email.ToLower() == email, ct);
         if (exists)
         {
             return new AuthResult(false, null, null, "Username or email already exists.", null, null, null);
@@ -56,8 +58,8 @@ public class AuthService : IAuthService
 
         var user = new User
         {
-            Username = request.Username.Trim(),
-            Email = request.Email.Trim().ToLowerInvariant(),
+            Username = username,
+            Email = email,
             FirstName = request.FirstName.Trim(),
             LastName = request.LastName.Trim(),
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
