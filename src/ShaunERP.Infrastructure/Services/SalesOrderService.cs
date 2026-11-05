@@ -398,6 +398,28 @@ public sealed class SalesOrderService : ISalesOrderService
         if (existing is not null)
             return await GetOrderAsync(existing.Id, ct);
 
+        // Quote lines store Discount as an absolute currency amount
+        // (qty * price - discount). Sales-order lines store Discount as a
+        // 0–100 percent. Copying the raw value treated e.g. ₹100 off as 100% off.
+        var mappedLines = quote.Lines.OrderBy(l => l.Id).Select((l, i) => new SalesOrderLine
+        {
+            ProductId = l.ProductId,
+            ProductName = l.ProductName,
+            Description = l.Description ?? l.ProductName,
+            Quantity = l.Quantity,
+            UnitPrice = l.UnitPrice,
+            Discount = AbsoluteLineDiscountToPercent(l.Quantity, l.UnitPrice, l.Discount),
+            TaxRate = 0,
+            SortOrder = i
+        }).ToList();
+
+        var taxableBase = mappedLines.Sum(LineNetBeforeTax);
+        var taxRate = taxableBase > 0 && quote.Tax > 0
+            ? Math.Round(quote.Tax / taxableBase * 100m, 6, MidpointRounding.AwayFromZero)
+            : 0m;
+        foreach (var line in mappedLines)
+            line.TaxRate = taxRate;
+
         var order = new SalesOrder
         {
             CustomerId = quote.CustomerId,
@@ -406,17 +428,8 @@ public sealed class SalesOrderService : ISalesOrderService
             CurrencyCode = quote.CurrencyCode ?? "USD",
             Notes = quote.Description,
             Terms = quote.Terms,
-            Lines = quote.Lines.OrderBy(l => l.Id).Select((l, i) => new SalesOrderLine
-            {
-                ProductId = l.ProductId,
-                ProductName = l.ProductName,
-                Description = l.Description ?? l.ProductName,
-                Quantity = l.Quantity,
-                UnitPrice = l.UnitPrice,
-                Discount = l.Discount,
-                TaxRate = 0,
-                SortOrder = i
-            }).ToList()
+            Discount = Math.Max(0, quote.Discount),
+            Lines = mappedLines
         };
 
         return await CreateOrderAsync(order, ct);
@@ -512,10 +525,25 @@ public sealed class SalesOrderService : ISalesOrderService
     {
         line.Discount = Math.Clamp(line.Discount, 0m, 100m);
         line.TaxRate = Math.Max(0, line.TaxRate);
-        var net = Math.Max(0, line.Quantity * line.UnitPrice * (1m - line.Discount / 100m));
+        var net = LineNetBeforeTax(line);
         line.TaxAmount = Math.Round(net * line.TaxRate / 100m, 2, MidpointRounding.AwayFromZero);
         line.LineTotal = Math.Round(net + line.TaxAmount, 2, MidpointRounding.AwayFromZero);
     }
+
+    /// <summary>
+    /// Quotes store line Discount as currency off the extended price.
+    /// Sales orders store line Discount as a percent (0–100).
+    /// </summary>
+    private static decimal AbsoluteLineDiscountToPercent(decimal quantity, decimal unitPrice, decimal absoluteDiscount)
+    {
+        var gross = quantity * unitPrice;
+        if (gross <= 0m || absoluteDiscount <= 0m)
+            return 0m;
+        return Math.Round(Math.Clamp(absoluteDiscount / gross * 100m, 0m, 100m), 6, MidpointRounding.AwayFromZero);
+    }
+
+    private static decimal LineNetBeforeTax(SalesOrderLine line)
+        => Math.Max(0, line.Quantity * line.UnitPrice * (1m - Math.Clamp(line.Discount, 0m, 100m) / 100m));
 
     private static void RecalcTotals(SalesOrder order)
     {
@@ -526,7 +554,7 @@ public sealed class SalesOrderService : ISalesOrderService
             ApplyLineTotals(line);
         }
 
-        var lineNet = order.Lines.Sum(l => Math.Max(0, l.Quantity * l.UnitPrice * (1m - Math.Clamp(l.Discount, 0, 100) / 100m)));
+        var lineNet = order.Lines.Sum(LineNetBeforeTax);
         order.Subtotal = Math.Round(lineNet, 2, MidpointRounding.AwayFromZero);
         order.Discount = Math.Min(Math.Max(0, order.Discount), order.Subtotal);
         order.TaxTotal = Math.Round(order.Lines.Sum(l => l.TaxAmount), 2, MidpointRounding.AwayFromZero);
