@@ -394,7 +394,9 @@ public sealed class SalesOrderService : ISalesOrderService
             throw new InvalidOperationException("Only accepted quotes can become sales orders.");
 
         var existing = await TenantOrders(_db.SalesOrders)
-            .FirstOrDefaultAsync(o => o.QuoteId == quoteId, ct);
+            .Where(o => o.QuoteId == quoteId && o.OrderStatus != SalesOrderStatus.Cancelled)
+            .OrderByDescending(o => o.Id)
+            .FirstOrDefaultAsync(ct);
         if (existing is not null)
             return await GetOrderAsync(existing.Id, ct);
 
