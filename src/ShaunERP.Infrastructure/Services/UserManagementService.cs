@@ -264,6 +264,8 @@ public class UserManagementService : IUserManagementService
 
         user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
         user.MustChangePassword = true;
+        user.FailedLoginCount = 0;
+        user.LockoutEnd = null;
         user.UpdatedDate = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
         return (true, null);

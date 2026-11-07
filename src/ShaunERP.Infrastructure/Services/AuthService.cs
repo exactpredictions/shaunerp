@@ -181,6 +181,8 @@ public class AuthService : IAuthService
 
         user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPassword);
         user.MustChangePassword = false;
+        user.FailedLoginCount = 0;
+        user.LockoutEnd = null;
         user.UpdatedDate = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
 

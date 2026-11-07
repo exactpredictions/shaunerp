@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using ShaunERP.Core.Identity;
+using ShaunERP.Core.Platform;
 using ShaunERP.Infrastructure.Persistence;
 using ShaunERP.Infrastructure.Platform;
 using ShaunERP.Infrastructure.Services;
@@ -33,6 +34,72 @@ public class AuthLockoutTests
         var locked = await auth.LoginAsync(new LoginRequest("lockme", "correct-horse"));
         Assert.False(locked.Success);
         Assert.Contains("locked", locked.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Admin_password_reset_unlocks_a_locked_account()
+    {
+        await using var db = CreateDb();
+        var auth = CreateAuth(db);
+        var lockedUser = new User
+        {
+            Username = "locked",
+            Email = "locked@example.com",
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword("old-password"),
+            IsActive = true
+        };
+        db.Users.Add(lockedUser);
+        await db.SaveChangesAsync();
+
+        for (var i = 0; i < AuthService.MaxFailedLogins; i++)
+        {
+            var fail = await auth.LoginAsync(new LoginRequest("locked", "wrong"));
+            Assert.False(fail.Success);
+        }
+
+        var stillLocked = await auth.LoginAsync(new LoginRequest("locked", "old-password"));
+        Assert.False(stillLocked.Success);
+        Assert.Contains("locked", stillLocked.Error, StringComparison.OrdinalIgnoreCase);
+
+        var users = CreateUsers(db);
+        var reset = await users.ResetPasswordAsync(lockedUser.Id, new ResetPasswordRequest("new-password1"));
+        Assert.True(reset.Ok, reset.Error);
+
+        var unlocked = await auth.LoginAsync(new LoginRequest("locked", "new-password1"));
+        Assert.True(unlocked.Success, unlocked.Error);
+        var user = await db.Users.SingleAsync();
+        Assert.Equal(0, user.FailedLoginCount);
+        Assert.Null(user.LockoutEnd);
+    }
+
+    [Fact]
+    public async Task Change_password_unlocks_a_locked_account()
+    {
+        await using var db = CreateDb();
+        var auth = CreateAuth(db);
+        var sessionUser = new User
+        {
+            Username = "sessionuser",
+            Email = "session@example.com",
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword("old-password"),
+            IsActive = true
+        };
+        db.Users.Add(sessionUser);
+        await db.SaveChangesAsync();
+
+        for (var i = 0; i < AuthService.MaxFailedLogins; i++)
+        {
+            Assert.False((await auth.LoginAsync(new LoginRequest("sessionuser", "wrong"))).Success);
+        }
+
+        var change = await auth.ChangePasswordAsync(sessionUser.Id, "old-password", "new-password1");
+        Assert.True(change.Ok, change.Error);
+
+        var unlocked = await auth.LoginAsync(new LoginRequest("sessionuser", "new-password1"));
+        Assert.True(unlocked.Success, unlocked.Error);
+        var user = await db.Users.SingleAsync();
+        Assert.Equal(0, user.FailedLoginCount);
+        Assert.Null(user.LockoutEnd);
     }
 
     [Fact]
@@ -76,6 +143,20 @@ public class AuthLockoutTests
             })
             .Build();
         return new AuthService(db, config, new StubAuthz(), new NoopAudit());
+    }
+
+    private static UserManagementService CreateUsers(ShaunErpDbContext db)
+    {
+        var tenant = new TenantContext();
+        tenant.Set(new TenantContextSnapshot
+        {
+            UserId = 99,
+            CompanyId = 1,
+            IsSystemAdmin = true,
+            Entitlements = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ModuleKeys.Users },
+            Permissions = new HashSet<string>(Permissions.AdminDefaults, StringComparer.OrdinalIgnoreCase)
+        });
+        return new UserManagementService(db, tenant, new ModuleRegistry());
     }
 
     private sealed class StubAuthz : IAuthorizationContextService
