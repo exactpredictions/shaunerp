@@ -286,6 +286,7 @@ public class FinanceService : IFinanceService
 
         _db.Invoices.Add(invoice);
         await _db.SaveChangesAsync(ct);
+        await SyncLinkedSalesOrderAsync(invoice.SalesOrderId, ct);
         return invoice;
     }
 
@@ -354,6 +355,7 @@ public class FinanceService : IFinanceService
         RecalcInvoiceTotals(row);
         RefreshPaymentStatus(row);
         await _db.SaveChangesAsync(ct);
+        await SyncLinkedSalesOrderAsync(row.SalesOrderId, ct);
         return row;
     }
 
@@ -368,8 +370,10 @@ public class FinanceService : IFinanceService
         if (row.InvoiceStatus is InvoiceStatus.Paid or InvoiceStatus.PartiallyPaid || row.Payments.Count > 0)
             throw new InvalidOperationException("Paid or partially paid invoices cannot be deleted. Void instead.");
 
+        var salesOrderId = row.SalesOrderId;
         _db.Invoices.Remove(row);
         await _db.SaveChangesAsync(ct);
+        await SyncLinkedSalesOrderAsync(salesOrderId, ct);
         return true;
     }
 
@@ -396,6 +400,7 @@ public class FinanceService : IFinanceService
         if (row.InvoiceStatus == InvoiceStatus.Draft)
             row.InvoiceStatus = InvoiceStatus.Sent;
         await _db.SaveChangesAsync(ct);
+        await SyncLinkedSalesOrderAsync(row.SalesOrderId, ct);
 
         try
         {
@@ -426,6 +431,7 @@ public class FinanceService : IFinanceService
         row.InvoiceStatus = InvoiceStatus.Void;
         row.IsPaid = false;
         await _db.SaveChangesAsync(ct);
+        await SyncLinkedSalesOrderAsync(row.SalesOrderId, ct);
 
         try
         {
@@ -466,6 +472,7 @@ public class FinanceService : IFinanceService
         row.InvoiceStatus = InvoiceStatus.Paid;
         row.IsPaid = true;
         await _db.SaveChangesAsync(ct);
+        await SyncLinkedSalesOrderAsync(row.SalesOrderId, ct);
         return row;
     }
 
@@ -540,6 +547,7 @@ public class FinanceService : IFinanceService
         RefreshPaymentStatus(row);
 
         await _db.SaveChangesAsync(ct);
+        await SyncLinkedSalesOrderAsync(row.SalesOrderId, ct);
         return (true, null, entity);
     }
 
@@ -813,6 +821,21 @@ public class FinanceService : IFinanceService
             return;
 
         await _accountingPosting.ReverseAsync(voucher.Id, $"Invoice {invoice.InvoiceNumber} voided", ct);
+    }
+
+    private async Task SyncLinkedSalesOrderAsync(int? salesOrderId, CancellationToken ct)
+    {
+        if (salesOrderId is not int orderId || orderId <= 0)
+            return;
+
+        var companyId = RequireCompanyId();
+        var order = await _db.SalesOrders
+            .FirstOrDefaultAsync(o => o.Id == orderId && o.CompanyId == companyId, ct);
+        if (order is null)
+            return;
+
+        await SalesOrderInvoicedAmountSync.ApplyAsync(_db, order, ct);
+        await _db.SaveChangesAsync(ct);
     }
 
     private IQueryable<Invoice> TenantInvoices(IQueryable<Invoice> query)

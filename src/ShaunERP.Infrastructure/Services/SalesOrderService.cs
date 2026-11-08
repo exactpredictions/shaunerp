@@ -334,7 +334,12 @@ public sealed class SalesOrderService : ISalesOrderService
             return (false, "Cannot invoice a cancelled order.", null);
         if (row.OrderStatus == SalesOrderStatus.Draft)
             return (false, "Confirm the order before creating an invoice.", null);
-        if (row.OrderStatus == SalesOrderStatus.Invoiced || row.BalanceToInvoice <= 0.01m)
+        var reserved = row.Invoices
+            .Where(i => i.InvoiceStatus != InvoiceStatus.Void)
+            .Sum(i => i.GrandTotal > 0 ? i.GrandTotal : i.Amount);
+        if (row.OrderStatus == SalesOrderStatus.Invoiced
+            || row.BalanceToInvoice <= 0.01m
+            || reserved + 0.01m >= row.GrandTotal)
             return (false, "Order is already fully invoiced.", null);
 
         ValidateOrder(row);
@@ -423,25 +428,7 @@ public sealed class SalesOrderService : ISalesOrderService
     }
 
     private async Task RefreshInvoicedAmountAsync(SalesOrder order, CancellationToken ct)
-    {
-        var invoices = await _db.Invoices.AsNoTracking()
-            .Where(i => i.SalesOrderId == order.Id && i.CompanyId == order.CompanyId)
-            .Where(i => i.InvoiceStatus != InvoiceStatus.Void)
-            .ToListAsync(ct);
-        order.AmountInvoiced = invoices.Sum(i => i.GrandTotal > 0 ? i.GrandTotal : i.Amount);
-
-        if (order.OrderStatus == SalesOrderStatus.Cancelled) return;
-
-        if (order.AmountInvoiced <= 0.01m)
-        {
-            if (order.OrderStatus is SalesOrderStatus.PartiallyInvoiced or SalesOrderStatus.Invoiced)
-                order.OrderStatus = SalesOrderStatus.Confirmed;
-        }
-        else if (order.AmountInvoiced + 0.01m >= order.GrandTotal)
-            order.OrderStatus = SalesOrderStatus.Invoiced;
-        else
-            order.OrderStatus = SalesOrderStatus.PartiallyInvoiced;
-    }
+        => await SalesOrderInvoicedAmountSync.ApplyAsync(_db, order, ct);
 
     private async Task<string> NextOrderNumberAsync(CompanyMaster book, CancellationToken ct)
     {
