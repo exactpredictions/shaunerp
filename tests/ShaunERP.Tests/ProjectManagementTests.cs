@@ -137,6 +137,90 @@ public class ProjectManagementTests
     }
 
     [Fact]
+    public async Task ApproveChangeRequest_AppliesCostAndHoursOnce()
+    {
+        await using var db = NewDb();
+        await SeedCompaniesAsync(db);
+        var service = NewService(db, companyId: 1, userId: 10);
+
+        var project = await service.CreateProjectAsync(new Project
+        {
+            Name = "ERP rollout",
+            Budget = 500_000m,
+            EstimatedHours = 400
+        });
+
+        var change = await service.CreateChangeRequestAsync(new ProjectChangeRequest
+        {
+            ProjectId = project.Id,
+            Description = "Add warehouse module",
+            EstimatedCost = 100_000m,
+            EstimatedHours = 80,
+            ApprovalStatus = ChangeRequestApprovalStatus.Submitted
+        });
+
+        var approved = await service.ApproveChangeRequestAsync(change.Id, approved: true);
+        Assert.NotNull(approved);
+        Assert.Equal(ChangeRequestApprovalStatus.Approved, approved!.ApprovalStatus);
+
+        var afterApprove = await service.GetProjectAsync(project.Id);
+        Assert.Equal(600_000m, afterApprove!.RevisedBudget);
+        Assert.Equal(480, afterApprove.EstimatedHours);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.ApproveChangeRequestAsync(change.Id, approved: true));
+        Assert.Contains("already been decided", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        var rejectEx = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.ApproveChangeRequestAsync(change.Id, approved: false));
+        Assert.Contains("already been decided", rejectEx.Message, StringComparison.OrdinalIgnoreCase);
+
+        var unchanged = await service.GetProjectAsync(project.Id);
+        Assert.Equal(600_000m, unchanged!.RevisedBudget);
+        Assert.Equal(480, unchanged.EstimatedHours);
+        Assert.Equal(ChangeRequestApprovalStatus.Approved,
+            (await service.ListChangeRequestsAsync(project.Id)).Single().ApprovalStatus);
+    }
+
+    [Fact]
+    public async Task RejectChangeRequest_DoesNotChangeBudgetAndCannotBeReopened()
+    {
+        await using var db = NewDb();
+        await SeedCompaniesAsync(db);
+        var service = NewService(db, companyId: 1, userId: 10);
+
+        var project = await service.CreateProjectAsync(new Project
+        {
+            Name = "Support retainer",
+            Budget = 50_000m,
+            EstimatedHours = 100
+        });
+
+        var change = await service.CreateChangeRequestAsync(new ProjectChangeRequest
+        {
+            ProjectId = project.Id,
+            Description = "Out of scope reporting pack",
+            EstimatedCost = 12_000m,
+            EstimatedHours = 40,
+            ApprovalStatus = ChangeRequestApprovalStatus.Submitted
+        });
+
+        var rejected = await service.ApproveChangeRequestAsync(change.Id, approved: false);
+        Assert.Equal(ChangeRequestApprovalStatus.Rejected, rejected!.ApprovalStatus);
+
+        var afterReject = await service.GetProjectAsync(project.Id);
+        Assert.Equal(0m, afterReject!.RevisedBudget);
+        Assert.Equal(100, afterReject.EstimatedHours);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.ApproveChangeRequestAsync(change.Id, approved: true));
+
+        var stillRejected = await service.GetProjectAsync(project.Id);
+        Assert.Equal(0m, stillRejected!.RevisedBudget);
+        Assert.Equal(100, stillRejected.EstimatedHours);
+    }
+
+    [Fact]
     public async Task Timesheet_ApprovalRollsUpHoursToTask()
     {
         await using var db = NewDb();

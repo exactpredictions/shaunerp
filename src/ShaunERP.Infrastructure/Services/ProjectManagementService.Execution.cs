@@ -760,6 +760,15 @@ public sealed partial class ProjectManagementService
         if (row is null) return null;
         var project = await RequireProjectAsync(row.ProjectId, ct);
 
+        if (row.ApprovalStatus is ChangeRequestApprovalStatus.Approved
+            or ChangeRequestApprovalStatus.Rejected
+            or ChangeRequestApprovalStatus.Implemented
+            or ChangeRequestApprovalStatus.Cancelled)
+        {
+            throw new InvalidOperationException(
+                "This change request has already been decided and cannot be approved or rejected again.");
+        }
+
         row.ApprovalStatus = approved ? ChangeRequestApprovalStatus.Approved : ChangeRequestApprovalStatus.Rejected;
         row.ApprovedByUserId = RequireUserId();
         row.ApprovedDate = DateTime.UtcNow;
