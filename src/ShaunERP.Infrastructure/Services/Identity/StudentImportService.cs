@@ -173,20 +173,13 @@ public sealed class StudentImportService : IStudentImportService
                 else if (match.Confidence == IdentityMatchConfidence.Conflict) report.Conflicts++;
 
                 int? partyId = null;
-                var externalId = $"student-row:{rowNumber}";
+                // Row number is not a person identity. A previous workbook's "student-row:1"
+                // must not attach this file's first student to that leftover party.
+                // Re-imports reuse people through phone/email match (EnsurePersonPartyAsync)
+                // and skip existing enrollments on (company, party, program).
+                var externalId = BuildStudentExternalId(companyId, phone.NormalizedPhone, email, row.Name);
 
-                // Idempotency: reuse party already linked for this workbook row.
-                var priorRow = await _db.ImportSourceRows.AsNoTracking()
-                    .Where(r => r.ExternalId == externalId && r.MatchedPartyId != null)
-                    .OrderByDescending(r => r.Id)
-                    .FirstOrDefaultAsync(ct);
-
-                if (priorRow?.MatchedPartyId is int priorPartyId)
-                {
-                    partyId = priorPartyId;
-                    report.ExistingPartiesReused++;
-                }
-                else if (options.AnalyzeOnly)
+                if (options.AnalyzeOnly)
                 {
                     if (match.Confidence == IdentityMatchConfidence.HighConfidence && match.PartyId is int existing)
                     {
@@ -264,7 +257,7 @@ public sealed class StudentImportService : IStudentImportService
                                 : match.Confidence == IdentityMatchConfidence.HighConfidence
                                     ? ImportMatchStatuses.Linked
                                     : ImportMatchStatuses.Created,
-                            MatchReason = match.Reason ?? (priorRow is not null ? "ReusedPriorSourceRow" : null),
+                            MatchReason = match.Reason,
                             ProcessedAt = DateTime.UtcNow,
                             CreatedDate = DateTime.UtcNow,
                             Status = "Active"
@@ -429,6 +422,14 @@ public sealed class StudentImportService : IStudentImportService
         }
 
         return rows;
+    }
+
+    private static string BuildStudentExternalId(int companyId, string? normalizedPhone, string? normalizedEmail, string? name)
+    {
+        var phone = string.IsNullOrWhiteSpace(normalizedPhone) ? "-" : normalizedPhone.Trim();
+        var email = string.IsNullOrWhiteSpace(normalizedEmail) ? "-" : normalizedEmail.Trim();
+        var display = string.IsNullOrWhiteSpace(name) ? "-" : name.Trim().ToLowerInvariant();
+        return $"student:{companyId}:p:{phone}:e:{email}:n:{display}";
     }
 
     private static (string? First, string? Last) SplitName(string? full)
