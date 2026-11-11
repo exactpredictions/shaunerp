@@ -132,13 +132,7 @@ public class UserManagementService : IUserManagementService
             .Include(u => u.CompanyUsers).ThenInclude(cu => cu.UserRoles).ThenInclude(ur => ur.Role)
             .FirstOrDefaultAsync(u => u.Id == id, ct);
 
-        if (user is null)
-        {
-            return null;
-        }
-
-        if (!_tenant.IsSystemAdmin && _tenant.CompanyId is int companyId
-            && user.CompanyUsers.All(cu => cu.CompanyId != companyId))
+        if (user is null || !CanManageUser(user))
         {
             return null;
         }
@@ -163,6 +157,12 @@ public class UserManagementService : IUserManagementService
             return (false, "Username or email already exists.", null);
         }
 
+        var (companyOk, companyError, companyId) = await ResolveAssignableCompanyAsync(request.CompanyId, ct);
+        if (!companyOk)
+        {
+            return (false, companyError, null);
+        }
+
         var user = new User
         {
             Username = username,
@@ -177,10 +177,6 @@ public class UserManagementService : IUserManagementService
 
         _db.Users.Add(user);
         await _db.SaveChangesAsync(ct);
-
-        var companyId = request.CompanyId
-            ?? _tenant.CompanyId
-            ?? await _db.Companies.OrderBy(c => c.Id).Select(c => (int?)c.Id).FirstOrDefaultAsync(ct);
 
         if (companyId is not null)
         {
@@ -204,9 +200,14 @@ public class UserManagementService : IUserManagementService
             .Include(u => u.CompanyUsers).ThenInclude(cu => cu.UserRoles)
             .FirstOrDefaultAsync(u => u.Id == id, ct);
 
-        if (user is null)
+        if (user is null || !CanManageUser(user))
         {
             return (false, "User not found.", null);
+        }
+
+        if (request.CompanyId is int requestedCompany && !CanAccessCompany(requestedCompany))
+        {
+            return (false, "Cannot assign a user to another company.", null);
         }
 
         var email = request.Email.Trim().ToLowerInvariant();
@@ -256,8 +257,10 @@ public class UserManagementService : IUserManagementService
             return (false, "Password must be at least 8 characters.");
         }
 
-        var user = await _db.Users.FindAsync([id], ct);
-        if (user is null)
+        var user = await _db.Users
+            .Include(u => u.CompanyUsers)
+            .FirstOrDefaultAsync(u => u.Id == id, ct);
+        if (user is null || !CanManageUser(user))
         {
             return (false, "User not found.");
         }
@@ -273,7 +276,15 @@ public class UserManagementService : IUserManagementService
     {
         EnsureUsersAccess(Permissions.RolesView);
         var q = _db.Roles.AsNoTracking().AsQueryable();
-        companyId ??= _tenant.CompanyId;
+        if (!_tenant.IsSystemAdmin)
+        {
+            companyId = _tenant.CompanyId;
+        }
+        else
+        {
+            companyId ??= _tenant.CompanyId;
+        }
+
         if (companyId is not null)
         {
             q = q.Where(r => r.CompanyId == null || r.CompanyId == companyId);
@@ -282,6 +293,48 @@ public class UserManagementService : IUserManagementService
         return await q.OrderBy(r => r.Name)
             .Select(r => new RoleDto(r.Id, r.Name, r.Description, r.CompanyId))
             .ToListAsync(ct);
+    }
+
+    private bool CanManageUser(User user)
+    {
+        if (_tenant.IsSystemAdmin)
+        {
+            return true;
+        }
+
+        if (_tenant.CompanyId is not int companyId)
+        {
+            return false;
+        }
+
+        return user.CompanyUsers.Any(cu => cu.CompanyId == companyId);
+    }
+
+    private bool CanAccessCompany(int companyId) =>
+        _tenant.IsSystemAdmin || _tenant.CompanyId == companyId;
+
+    private async Task<(bool Ok, string? Error, int? CompanyId)> ResolveAssignableCompanyAsync(
+        int? requestedCompanyId, CancellationToken ct)
+    {
+        if (!_tenant.IsSystemAdmin)
+        {
+            if (_tenant.CompanyId is not int callerCompany)
+            {
+                return (false, "Tenant context is required.", null);
+            }
+
+            if (requestedCompanyId is int requested && requested != callerCompany)
+            {
+                return (false, "Cannot create a user in another company.", null);
+            }
+
+            return (true, null, callerCompany);
+        }
+
+        var companyId = requestedCompanyId
+            ?? _tenant.CompanyId
+            ?? await _db.Companies.OrderBy(c => c.Id).Select(c => (int?)c.Id).FirstOrDefaultAsync(ct);
+        return (true, null, companyId);
     }
 
     private void EnsureUsersAccess(string permission)
