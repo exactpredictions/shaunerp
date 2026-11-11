@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ShaunERP.Infrastructure.Persistence;
+using ShaunERP.Infrastructure.Platform;
 
 namespace ShaunERP.Api.Controllers;
 
@@ -11,13 +12,29 @@ namespace ShaunERP.Api.Controllers;
 public class CompaniesController : ControllerBase
 {
     private readonly ShaunErpDbContext _db;
+    private readonly ITenantContext _tenant;
 
-    public CompaniesController(ShaunErpDbContext db) => _db = db;
+    public CompaniesController(ShaunErpDbContext db, ITenantContext tenant)
+    {
+        _db = db;
+        _tenant = tenant;
+    }
 
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
     {
-        var companies = await _db.Companies.AsNoTracking()
+        var query = _db.Companies.AsNoTracking().AsQueryable();
+        if (!_tenant.IsSystemAdmin)
+        {
+            if (_tenant.CompanyId is not int companyId)
+            {
+                return Ok(Array.Empty<object>());
+            }
+
+            query = query.Where(c => c.Id == companyId);
+        }
+
+        var companies = await query
             .Select(c => new
             {
                 c.Id,

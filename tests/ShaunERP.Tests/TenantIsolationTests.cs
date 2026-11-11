@@ -123,6 +123,150 @@ public class TenantIsolationTests
         Assert.False(await access.BelongsToAsync(5, 2));
     }
 
+    [Fact]
+    public async Task CompanyAdmin_CannotResetPasswordOfOtherTenantUser()
+    {
+        await using var db = await SeedTwoTenantUsersAsync();
+        var users = CreateUserManagement(db, companyId: 1, systemAdmin: false);
+
+        var (ok, error) = await users.ResetPasswordAsync(20, new ResetPasswordRequest("NewPassword1"));
+        Assert.False(ok);
+        Assert.Equal("User not found.", error);
+        Assert.Equal("old-hash-b", (await db.Users.FindAsync(20))!.PasswordHash);
+    }
+
+    [Fact]
+    public async Task CompanyAdmin_CannotUpdateOtherTenantUser()
+    {
+        await using var db = await SeedTwoTenantUsersAsync();
+        var users = CreateUserManagement(db, companyId: 1, systemAdmin: false);
+
+        var (ok, error, updated) = await users.UpdateUserAsync(20, new UpdateUserRequest(
+            "Hacked", "User", "bob@b.example", null, false, 2, "Admin"));
+        Assert.False(ok);
+        Assert.Equal("User not found.", error);
+        Assert.Null(updated);
+        var bob = await db.Users.FindAsync(20);
+        Assert.Equal("Bob", bob!.FirstName);
+        Assert.True(bob.IsActive);
+    }
+
+    [Fact]
+    public async Task CompanyAdmin_CannotCreateUserInOtherCompany()
+    {
+        await using var db = await SeedTwoTenantUsersAsync();
+        var users = CreateUserManagement(db, companyId: 1, systemAdmin: false);
+
+        var (ok, error, created) = await users.CreateUserAsync(new CreateUserRequest(
+            "intruder", "intruder@b.example", "Password1!", "In", "Truder", null, 2, "Admin"));
+        Assert.False(ok);
+        Assert.Equal("Cannot create a user in another company.", error);
+        Assert.Null(created);
+        Assert.False(await db.Users.AnyAsync(u => u.Username == "intruder"));
+    }
+
+    [Fact]
+    public async Task CompanyAdmin_CannotAssignLocalUserToOtherCompany()
+    {
+        await using var db = await SeedTwoTenantUsersAsync();
+        var users = CreateUserManagement(db, companyId: 1, systemAdmin: false);
+
+        var (ok, error, _) = await users.UpdateUserAsync(10, new UpdateUserRequest(
+            "Alice", "Admin", "alice@a.example", null, true, 2, "Admin"));
+        Assert.False(ok);
+        Assert.Equal("Cannot assign a user to another company.", error);
+        Assert.False(await db.CompanyUsers.AnyAsync(cu => cu.UserId == 10 && cu.CompanyId == 2));
+    }
+
+    [Fact]
+    public async Task CompanyAdmin_CreatesUserInOwnCompanyWhenCompanyIdOmitted()
+    {
+        await using var db = await SeedTwoTenantUsersAsync();
+        var users = CreateUserManagement(db, companyId: 1, systemAdmin: false);
+
+        var (ok, error, created) = await users.CreateUserAsync(new CreateUserRequest(
+            "newalice", "newalice@a.example", "Password1!", "New", "Alice", null, null, "User"));
+        Assert.True(ok, error);
+        Assert.NotNull(created);
+        var membership = await db.CompanyUsers.SingleAsync(cu => cu.UserId == created!.Id);
+        Assert.Equal(1, membership.CompanyId);
+        Assert.False(await db.CompanyUsers.AnyAsync(cu => cu.UserId == created.Id && cu.CompanyId == 2));
+    }
+
+    [Fact]
+    public async Task CompanyAdmin_CanResetPasswordOfOwnTenantUser()
+    {
+        await using var db = await SeedTwoTenantUsersAsync();
+        var users = CreateUserManagement(db, companyId: 1, systemAdmin: false);
+
+        var (ok, error) = await users.ResetPasswordAsync(10, new ResetPasswordRequest("NewPassword1"));
+        Assert.True(ok, error);
+        var alice = await db.Users.FindAsync(10);
+        Assert.NotEqual("old-hash-a", alice!.PasswordHash);
+        Assert.True(alice.MustChangePassword);
+    }
+
+    [Fact]
+    public async Task SystemAdmin_CanResetPasswordOfAnyTenantUser()
+    {
+        await using var db = await SeedTwoTenantUsersAsync();
+        var users = CreateUserManagement(db, companyId: 1, systemAdmin: true);
+
+        var (ok, error) = await users.ResetPasswordAsync(20, new ResetPasswordRequest("NewPassword1"));
+        Assert.True(ok, error);
+        Assert.NotEqual("old-hash-b", (await db.Users.FindAsync(20))!.PasswordHash);
+    }
+
+    private static UserManagementService CreateUserManagement(
+        ShaunErpDbContext db, int companyId, bool systemAdmin)
+    {
+        var tenant = new TenantContext();
+        tenant.Set(new TenantContextSnapshot
+        {
+            UserId = 10,
+            CompanyId = companyId,
+            IsSystemAdmin = systemAdmin,
+            Entitlements = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ModuleKeys.Users },
+            Permissions = new HashSet<string>(Permissions.AdminDefaults, StringComparer.OrdinalIgnoreCase)
+        });
+        return new UserManagementService(db, tenant, new ModuleRegistry());
+    }
+
+    private static async Task<ShaunErpDbContext> SeedTwoTenantUsersAsync()
+    {
+        var options = new DbContextOptionsBuilder<ShaunErpDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        var db = new ShaunErpDbContext(options);
+        db.Companies.AddRange(new Company { Id = 1, Name = "A" }, new Company { Id = 2, Name = "B" });
+        db.Users.AddRange(
+            new User
+            {
+                Id = 10,
+                Username = "alice",
+                Email = "alice@a.example",
+                FirstName = "Alice",
+                LastName = "Admin",
+                PasswordHash = "old-hash-a",
+                IsActive = true
+            },
+            new User
+            {
+                Id = 20,
+                Username = "bob",
+                Email = "bob@b.example",
+                FirstName = "Bob",
+                LastName = "Admin",
+                PasswordHash = "old-hash-b",
+                IsActive = true
+            });
+        db.CompanyUsers.AddRange(
+            new CompanyUser { Id = 100, UserId = 10, CompanyId = 1 },
+            new CompanyUser { Id = 200, UserId = 20, CompanyId = 2 });
+        await db.SaveChangesAsync();
+        return db;
+    }
+
     private sealed class TestDbFactory(DbContextOptions<ShaunErpDbContext> options) : IDbContextFactory<ShaunErpDbContext>
     {
         public ShaunErpDbContext CreateDbContext() => new(options);
