@@ -360,7 +360,7 @@
     private int _totalsVersion;
 
     private bool _isDraft => _model.InvoiceStatus == InvoiceStatus.Draft;
-    private bool _isLocked => _model.InvoiceStatus is InvoiceStatus.Paid or InvoiceStatus.Void;
+    private bool _isLocked => _model.InvoiceStatus is not InvoiceStatus.Draft;
 
     protected override async Task OnParametersSetAsync()
     {
