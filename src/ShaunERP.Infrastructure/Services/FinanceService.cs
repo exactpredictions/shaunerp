@@ -298,8 +298,9 @@ public class FinanceService : IFinanceService
             .FirstOrDefaultAsync(i => i.Id == id, ct);
         if (row is null) return null;
 
-        if (row.InvoiceStatus is InvoiceStatus.Void or InvoiceStatus.Paid)
-            throw new InvalidOperationException("Paid or void invoices cannot be edited.");
+        if (row.InvoiceStatus is not InvoiceStatus.Draft)
+            throw new InvalidOperationException(
+                "Issued, paid, or void invoices cannot be edited. Void and recreate to correct amounts.");
 
         row.CompanyId = RequireCompanyId();
         row.CustomerId = update.CustomerId;
@@ -315,8 +316,7 @@ public class FinanceService : IFinanceService
             ? null : update.Terms.Trim();
         await ResolveCustomerNameAsync(row, ct);
 
-        // Number is locked once issued (non-draft)
-        if (row.InvoiceStatus == InvoiceStatus.Draft && !string.IsNullOrWhiteSpace(update.InvoiceNumber))
+        if (!string.IsNullOrWhiteSpace(update.InvoiceNumber))
             row.InvoiceNumber = update.InvoiceNumber.Trim();
         row.InvoiceDate = NormalizeUtc(update.InvoiceDate) ?? row.InvoiceDate;
         row.DueDate = NormalizeUtc(update.DueDate);
@@ -324,10 +324,6 @@ public class FinanceService : IFinanceService
         row.PaymentTerms = update.PaymentTerms;
         row.Notes = update.Notes;
         row.Discount = Math.Max(0, update.Discount);
-
-        // Status changes that don't require mark-paid permission
-        if (update.InvoiceStatus is InvoiceStatus.Draft or InvoiceStatus.Sent)
-            row.InvoiceStatus = update.InvoiceStatus;
 
         _db.InvoiceLines.RemoveRange(row.Lines);
         row.Lines.Clear();
@@ -385,31 +381,10 @@ public class FinanceService : IFinanceService
         if (row.InvoiceStatus == InvoiceStatus.Paid)
             throw new InvalidOperationException("Paid invoices are already issued.");
 
-        ValidateInvoice(row);
-
-        if (string.IsNullOrWhiteSpace(row.InvoiceNumber))
-        {
-            var book = await GetOrCreateBillingBookAsync(ct);
-            row.InvoiceNumber = await NextInvoiceNumberAsync(book, ct);
-        }
-
         if (row.InvoiceStatus == InvoiceStatus.Draft)
-            row.InvoiceStatus = InvoiceStatus.Sent;
-        await _db.SaveChangesAsync(ct);
-
-        try
-        {
-            await PostInvoiceAccountingAsync(row, ct);
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // Accounting module may be disabled; invoicing still succeeds.
-        }
-        catch (Exception)
-        {
-            // Surface accounting failures — invoice is already Sent; caller can retry posting from accounting.
-            throw;
-        }
+            await IssueDraftInvoiceAsync(row, ct);
+        else
+            await TryPostInvoiceAccountingAsync(row, ct);
 
         return row;
     }
@@ -442,11 +417,14 @@ public class FinanceService : IFinanceService
     {
         EnsureFinanceAccess(Permissions.FinanceInvoicesMarkPaid);
         var row = await TenantInvoices(_db.Invoices)
+            .Include(i => i.Lines)
             .Include(i => i.Payments)
             .FirstOrDefaultAsync(i => i.Id == id, ct);
         if (row is null) return null;
         if (row.InvoiceStatus == InvoiceStatus.Void)
             throw new InvalidOperationException("Cannot mark a void invoice as paid.");
+        if (row.InvoiceStatus == InvoiceStatus.Draft)
+            await IssueDraftInvoiceAsync(row, ct);
 
         var remaining = row.BalanceDue;
         if (remaining > 0)
@@ -509,6 +487,7 @@ public class FinanceService : IFinanceService
     {
         EnsureFinanceAccess(Permissions.FinancePaymentsRecord);
         var row = await TenantInvoices(_db.Invoices)
+            .Include(i => i.Lines)
             .Include(i => i.Payments)
             .FirstOrDefaultAsync(i => i.Id == invoiceId, ct);
         if (row is null) return (false, "Invoice not found.", null);
@@ -516,6 +495,17 @@ public class FinanceService : IFinanceService
             return (false, "Cannot record payment on a void invoice.", null);
         if (payment.Amount <= 0)
             return (false, "Payment amount must be greater than zero.", null);
+        if (row.InvoiceStatus == InvoiceStatus.Draft)
+        {
+            try
+            {
+                await IssueDraftInvoiceAsync(row, ct);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return (false, ex.Message, null);
+            }
+        }
 
         var balance = row.BalanceDue;
         if (payment.Amount > balance + 0.01m)
@@ -534,9 +524,6 @@ public class FinanceService : IFinanceService
         };
         row.Payments.Add(entity);
         row.AmountPaid = row.Payments.Sum(p => p.Amount);
-        RefreshPaymentStatus(row);
-        if (row.InvoiceStatus == InvoiceStatus.Draft)
-            row.InvoiceStatus = InvoiceStatus.Sent;
         RefreshPaymentStatus(row);
 
         await _db.SaveChangesAsync(ct);
@@ -693,6 +680,41 @@ public class FinanceService : IFinanceService
         invoice.IsPaid = invoice.InvoiceStatus == InvoiceStatus.Paid;
         if (invoice.IsPaid)
             invoice.AmountPaid = invoice.GrandTotal > 0 ? invoice.GrandTotal : invoice.Amount;
+    }
+
+    /// <summary>
+    /// Assigns a number, posts the sales voucher, then marks the draft as Sent.
+    /// Posting runs before the status change so a GL failure cannot leave a Sent invoice with no voucher.
+    /// </summary>
+    private async Task IssueDraftInvoiceAsync(Invoice invoice, CancellationToken ct)
+    {
+        if (invoice.InvoiceStatus != InvoiceStatus.Draft)
+            return;
+
+        ValidateInvoice(invoice);
+
+        if (string.IsNullOrWhiteSpace(invoice.InvoiceNumber))
+        {
+            var book = await GetOrCreateBillingBookAsync(ct);
+            invoice.InvoiceNumber = await NextInvoiceNumberAsync(book, ct);
+        }
+
+        await TryPostInvoiceAccountingAsync(invoice, ct);
+
+        invoice.InvoiceStatus = InvoiceStatus.Sent;
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private async Task TryPostInvoiceAccountingAsync(Invoice invoice, CancellationToken ct)
+    {
+        try
+        {
+            await PostInvoiceAccountingAsync(invoice, ct);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Accounting module may be disabled; invoicing still succeeds.
+        }
     }
 
     private async Task PostInvoiceAccountingAsync(Invoice invoice, CancellationToken ct)
