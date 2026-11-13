@@ -141,10 +141,13 @@ public sealed class PremiumSubscriberImportService : IPremiumSubscriberImportSer
             await _db.SaveChangesAsync(ct);
         }
 
+        // A resubscribed user appears on both sheets (current active + historical expiry).
+        // Process active first, then refuse to let the old sheet expire that same legacy user id.
+        var activeUserIds = activeRows.Select(r => r.UserId).ToHashSet();
         await ProcessSheetAsync(companyId, plan.Id, activeRows, MembershipStatuses.Active, "active_premium_subscribers",
-            options.AnalyzeOnly, batch, report.Active, ct);
+            options.AnalyzeOnly, batch, report.Active, protectedActiveUserIds: null, ct);
         await ProcessSheetAsync(companyId, plan.Id, oldRows, MembershipStatuses.Expired, "old_premium_subscribers",
-            options.AnalyzeOnly, batch, report.Inactive, ct);
+            options.AnalyzeOnly, batch, report.Inactive, protectedActiveUserIds: activeUserIds, ct);
 
         if (!options.AnalyzeOnly && batch is not null)
         {
@@ -184,6 +187,7 @@ public sealed class PremiumSubscriberImportService : IPremiumSubscriberImportSer
         bool analyzeOnly,
         ImportBatch? batch,
         PremiumSheetStats stats,
+        HashSet<int>? protectedActiveUserIds,
         CancellationToken ct)
     {
         var rowNumber = 0;
@@ -354,6 +358,14 @@ public sealed class PremiumSubscriberImportService : IPremiumSubscriberImportSer
 
                 if (analyzeOnly || partyId is null)
                 {
+                    continue;
+                }
+
+                if (protectedActiveUserIds is not null
+                    && protectedActiveUserIds.Contains(row.UserId)
+                    && membershipStatus != MembershipStatuses.Active)
+                {
+                    stats.MembershipsSkipped++;
                     continue;
                 }
 
