@@ -166,6 +166,55 @@ public class ProjectManagementTests
     }
 
     [Fact]
+    public async Task Timesheet_RejectRemovesRolledUpHours_AndResubmitRestoresThem()
+    {
+        await using var db = NewDb();
+        await SeedCompaniesAsync(db);
+        var service = NewService(db, companyId: 1, userId: 10);
+
+        var project = await service.CreateProjectAsync(new Project { Name = "Support retainer" });
+        var task = await service.CreateTaskAsync(new ProjectTask { ProjectId = project.Id, Name = "Triage" });
+
+        var kept = await service.CreateTimesheetAsync(new ProjectTimesheet
+        {
+            ProjectId = project.Id,
+            TaskId = task.Id,
+            Hours = 3.5m,
+            BillableHours = 3.5m,
+            WorkDate = new DateTime(2026, 2, 10)
+        });
+        await service.SubmitTimesheetAsync(kept.Id);
+        await service.ApproveTimesheetAsync(kept.Id);
+
+        var rejected = await service.CreateTimesheetAsync(new ProjectTimesheet
+        {
+            ProjectId = project.Id,
+            TaskId = task.Id,
+            Hours = 2m,
+            BillableHours = 2m,
+            WorkDate = new DateTime(2026, 2, 11)
+        });
+        await service.SubmitTimesheetAsync(rejected.Id);
+
+        var afterSubmit = await service.GetTaskAsync(task.Id);
+        Assert.Equal(5.5m, afterSubmit!.ActualHours);
+        Assert.Equal(5.5m, (await service.GetProjectAsync(project.Id))!.ActualHours);
+
+        var result = await service.RejectTimesheetAsync(rejected.Id, "Duplicate of another ticket");
+        Assert.NotNull(result);
+        Assert.Equal(TimesheetEntryStatus.Rejected, result!.EntryStatus);
+
+        var afterReject = await service.GetTaskAsync(task.Id);
+        Assert.Equal(3.5m, afterReject!.ActualHours);
+        Assert.Equal(3.5m, (await service.GetProjectAsync(project.Id))!.ActualHours);
+
+        await service.SubmitTimesheetAsync(rejected.Id);
+        var afterResubmit = await service.GetTaskAsync(task.Id);
+        Assert.Equal(5.5m, afterResubmit!.ActualHours);
+        Assert.Equal(5.5m, (await service.GetProjectAsync(project.Id))!.ActualHours);
+    }
+
+    [Fact]
     public async Task MissingPermission_BlocksProjectCreation()
     {
         await using var db = NewDb();
