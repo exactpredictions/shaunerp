@@ -879,6 +879,7 @@ public sealed partial class ProjectManagementService
         row.EntryStatus = TimesheetEntryStatus.Submitted;
         row.SubmittedDate = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
+        await SyncTaskAndProjectHoursAsync(row.ProjectId, row.TaskId, ct);
         return row;
     }
 
@@ -913,6 +914,7 @@ public sealed partial class ProjectManagementService
         if (!string.IsNullOrWhiteSpace(reason))
             row.Description = $"{row.Description} · Rejected: {reason.Trim()}".Trim(' ', '·');
         await _db.SaveChangesAsync(ct);
+        await SyncTaskAndProjectHoursAsync(row.ProjectId, row.TaskId, ct);
         await AuditAsync("projects.timesheet.rejected", "ProjectTimesheet", row.Id, reason, ct);
         return row;
     }
