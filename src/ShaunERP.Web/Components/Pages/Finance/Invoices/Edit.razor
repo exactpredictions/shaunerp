@@ -274,6 +274,11 @@
                         <button class="btn ghost" type="button" disabled="@_saving" @onclick="SendAsync">Mark sent</button>
                     }
 
+                    @if (!_isNew && _model.InvoiceStatus == InvoiceStatus.Sent && !_isLocked)
+                    {
+                        <button class="btn ghost" type="button" disabled="@_saving" @onclick="SendAsync">Retry ledger posting</button>
+                    }
+
                     @if (!_isNew && _model.InvoiceStatus is InvoiceStatus.Sent or InvoiceStatus.PartiallyPaid or InvoiceStatus.Draft)
                     {
                         <button class="btn ghost" type="button" disabled="@_saving" @onclick="MarkPaidAsync">Mark paid</button>
@@ -693,16 +698,20 @@
         _saving = true;
         try
         {
-            // Persist edits first so Mark sent uses current lines
-            ApplyFormToModel();
-            _model.InvoiceStatus = InvoiceStatus.Draft;
-            var updated = await Finance.UpdateInvoiceAsync(Id, _model);
-            if (updated is null) { _error = "Not found."; return; }
+            var retryPosting = !_isDraft;
+            if (_isDraft)
+            {
+                // Persist edits first so Mark sent uses current lines
+                ApplyFormToModel();
+                _model.InvoiceStatus = InvoiceStatus.Draft;
+                var updated = await Finance.UpdateInvoiceAsync(Id, _model);
+                if (updated is null) { _error = "Not found."; return; }
+            }
 
             var row = await Finance.MarkSentAsync(Id);
             if (row is null) { _error = "Not found."; return; }
             await ReloadAsync();
-            _ok = "Marked as sent.";
+            _ok = retryPosting ? "Ledger posting retried." : "Marked as sent.";
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _saving = false; }
