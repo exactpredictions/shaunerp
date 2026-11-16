@@ -706,7 +706,16 @@ public class FinanceService : IFinanceService
             return;
 
         if (invoice.AccountingVoucherId is > 0)
-            return;
+        {
+            var linked = await _db.AccountingVouchers.AsNoTracking()
+                .FirstOrDefaultAsync(
+                    v => v.Id == invoice.AccountingVoucherId && v.CompanyId == invoice.CompanyId, ct);
+            if (linked is not null && linked.VoucherStatus == VoucherStatus.Posted)
+                return;
+
+            // The stored voucher was reversed or removed; allow a new Primary posting.
+            invoice.AccountingVoucherId = null;
+        }
 
         var existing = await _accountingPosting.FindBySourceAsync(
             AccountingSourceModules.Sales, nameof(Invoice), invoice.Id.ToString(), "Primary", ct);
