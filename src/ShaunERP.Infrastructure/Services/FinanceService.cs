@@ -393,23 +393,15 @@ public class FinanceService : IFinanceService
             row.InvoiceNumber = await NextInvoiceNumberAsync(book, ct);
         }
 
+        // Post while still Draft. PostInvoiceAccountingAsync no-ops when accounting is
+        // disabled or auto-post is off; any real posting failure must not leave a Sent
+        // invoice with no sales voucher (the previous catch of UnauthorizedAccessException
+        // did exactly that for User-role clerks, who can mark sent but cannot post).
+        await PostInvoiceAccountingAsync(row, ct);
+
         if (row.InvoiceStatus == InvoiceStatus.Draft)
             row.InvoiceStatus = InvoiceStatus.Sent;
         await _db.SaveChangesAsync(ct);
-
-        try
-        {
-            await PostInvoiceAccountingAsync(row, ct);
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // Accounting module may be disabled; invoicing still succeeds.
-        }
-        catch (Exception)
-        {
-            // Surface accounting failures — invoice is already Sent; caller can retry posting from accounting.
-            throw;
-        }
 
         return row;
     }
@@ -423,17 +415,14 @@ public class FinanceService : IFinanceService
         if (row is null) return null;
         if (row.Payments.Count > 0)
             throw new InvalidOperationException("Cannot void an invoice with recorded payments.");
+
+        // Reverse first so a permission/posting failure cannot void the invoice while
+        // leaving the original sales voucher posted in the GL.
+        await ReverseInvoiceAccountingAsync(row, ct);
+
         row.InvoiceStatus = InvoiceStatus.Void;
         row.IsPaid = false;
         await _db.SaveChangesAsync(ct);
-
-        try
-        {
-            await ReverseInvoiceAccountingAsync(row, ct);
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
 
         return row;
     }
