@@ -85,14 +85,15 @@ public class FinanceService : IFinanceService
         var overdue = invoices.Count(i => i.IsOverdue);
         var paid = invoices.Count(i => i.InvoiceStatus == InvoiceStatus.Paid || i.IsPaid);
         var outstanding = invoices
-            .Where(i => i.InvoiceStatus is not (InvoiceStatus.Void or InvoiceStatus.Paid) && !i.IsPaid)
+            .Where(i => i.InvoiceStatus is InvoiceStatus.Sent or InvoiceStatus.PartiallyPaid && !i.IsPaid)
             .Sum(i => i.BalanceDue);
         var collected = invoices
             .SelectMany(i => i.Payments)
             .Where(p => p.PaymentDate >= monthStart)
             .Sum(p => p.Amount);
         var invoiced = invoices
-            .Where(i => i.InvoiceDate >= monthStart && i.InvoiceStatus != InvoiceStatus.Void)
+            .Where(i => i.InvoiceDate >= monthStart
+                        && i.InvoiceStatus is not InvoiceStatus.Draft and not InvoiceStatus.Void)
             .Sum(i => i.GrandTotal > 0 ? i.GrandTotal : i.Amount);
         var paymentCount = invoices.Sum(i => i.Payments.Count);
 
