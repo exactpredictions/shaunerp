@@ -242,8 +242,7 @@ public sealed class AccountingReportService : IAccountingReportService
         var companyId = RequireCompanyId();
         var invoices = await _db.Invoices.AsNoTracking()
             .Where(i => i.CompanyId == companyId
-                        && i.InvoiceStatus != InvoiceStatus.Void
-                        && i.InvoiceStatus != InvoiceStatus.Paid
+                        && (i.InvoiceStatus == InvoiceStatus.Sent || i.InvoiceStatus == InvoiceStatus.PartiallyPaid)
                         && !i.IsPaid)
             .OrderBy(i => i.DueDate)
             .Take(500)
