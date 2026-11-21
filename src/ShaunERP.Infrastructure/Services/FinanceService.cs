@@ -421,19 +421,24 @@ public class FinanceService : IFinanceService
             .Include(i => i.Payments)
             .FirstOrDefaultAsync(i => i.Id == id, ct);
         if (row is null) return null;
+        if (row.InvoiceStatus == InvoiceStatus.Void)
+            return row;
         if (row.Payments.Count > 0)
             throw new InvalidOperationException("Cannot void an invoice with recorded payments.");
-        row.InvoiceStatus = InvoiceStatus.Void;
-        row.IsPaid = false;
-        await _db.SaveChangesAsync(ct);
 
+        // Reverse GL first so a closed year or period lock cannot leave a voided invoice with live sales.
         try
         {
             await ReverseInvoiceAccountingAsync(row, ct);
         }
         catch (UnauthorizedAccessException)
         {
+            // Accounting module may be disabled for this role; the invoice document can still void.
         }
+
+        row.InvoiceStatus = InvoiceStatus.Void;
+        row.IsPaid = false;
+        await _db.SaveChangesAsync(ct);
 
         return row;
     }
