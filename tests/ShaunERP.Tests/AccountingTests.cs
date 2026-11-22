@@ -89,6 +89,65 @@ public class AccountingTests
     }
 
     [Fact]
+    public async Task ClosedYear_Rejects_Posting_Even_When_OpenYearId_Is_Supplied()
+    {
+        var (db, _, posting, accounting, _) = await CreateAsync();
+        await accounting.EnsureBootstrapAsync();
+
+        var closed = await db.FinancialYears.FirstAsync(y => y.CompanyId == 1);
+        closed.IsClosed = true;
+        closed.IsCurrent = false;
+
+        var openStart = closed.EndDate.Date.AddDays(1);
+        var open = new FinancialYear
+        {
+            CompanyId = 1,
+            Name = $"{openStart.Year}-{openStart.Year + 1}",
+            StartDate = openStart,
+            EndDate = openStart.AddYears(1).AddDays(-1),
+            IsCurrent = true,
+            CreatedDate = DateTime.UtcNow
+        };
+        db.FinancialYears.Add(open);
+        await db.SaveChangesAsync();
+
+        var bank = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.BankDefault);
+        var rent = await db.Ledgers.FirstAsync(l => l.LedgerCode == "RENT");
+        var closedDate = closed.StartDate.AddDays(10);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => posting.PostAsync(new AccountingPostingRequest
+        {
+            FinancialYearId = open.Id,
+            TransactionDate = closedDate,
+            VoucherTypeCode = SystemVoucherTypeCodes.Payment,
+            Narration = "Backdated into a closed year",
+            Lines =
+            [
+                new() { LedgerId = rent.Id, Debit = 100 },
+                new() { LedgerId = bank.Id, Credit = 100 }
+            ]
+        }));
+        Assert.Contains("closed", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Empty(await db.AccountingVouchers.ToListAsync());
+
+        var allowed = await posting.PostAsync(new AccountingPostingRequest
+        {
+            FinancialYearId = open.Id,
+            TransactionDate = openStart.AddDays(5),
+            VoucherTypeCode = SystemVoucherTypeCodes.Payment,
+            Narration = "Current open year",
+            Lines =
+            [
+                new() { LedgerId = rent.Id, Debit = 100 },
+                new() { LedgerId = bank.Id, Credit = 100 }
+            ]
+        });
+        Assert.Equal(VoucherStatus.Posted, allowed.VoucherStatus);
+        Assert.Equal(open.Id, allowed.FinancialYearId);
+    }
+
+    [Fact]
     public async Task Reversal_Creates_Opposite_Entries_And_Duplicate_Source_Is_Idempotent()
     {
         var (db, _, posting, accounting, _) = await CreateAsync();
