@@ -79,8 +79,6 @@ public sealed class AccountingPostingService : IAccountingPostingService
         try
         {
             var fy = await ResolveFinancialYearAsync(companyId, request.FinancialYearId, request.TransactionDate, ct);
-            if (fy.IsClosed)
-                throw new InvalidOperationException("Financial year is closed.");
 
             await EnsureNotLockedAsync(companyId, request.TransactionDate, ct);
 
@@ -190,6 +188,7 @@ public sealed class AccountingPostingService : IAccountingPostingService
 
         if (voucher.FinancialYear?.IsClosed == true)
             throw new InvalidOperationException("Financial year is closed.");
+        await EnsureDateNotInClosedYearAsync(companyId, voucher.VoucherDate, ct);
 
         await EnsureNotLockedAsync(companyId, voucher.VoucherDate, ct);
 
@@ -315,19 +314,34 @@ public sealed class AccountingPostingService : IAccountingPostingService
         int companyId, int? financialYearId, DateTime date, CancellationToken ct)
     {
         var d = NormalizeDate(date);
+        var yearForDate = await FindYearContainingDateAsync(companyId, d, ct)
+            ?? throw new InvalidOperationException("Voucher date must fall within a financial year.");
+        if (yearForDate.IsClosed)
+            throw new InvalidOperationException("Financial year is closed.");
+
         if (financialYearId is > 0)
         {
-            return await _db.FinancialYears.FirstOrDefaultAsync(
-                       y => y.Id == financialYearId && y.CompanyId == companyId, ct)
-                   ?? throw new InvalidOperationException("Financial year not found.");
+            var requested = await _db.FinancialYears.FirstOrDefaultAsync(
+                                y => y.Id == financialYearId && y.CompanyId == companyId, ct)
+                            ?? throw new InvalidOperationException("Financial year not found.");
+            if (requested.IsClosed)
+                throw new InvalidOperationException("Financial year is closed.");
+            return requested;
         }
 
-        var fy = await _db.FinancialYears.FirstOrDefaultAsync(
-            y => y.CompanyId == companyId && y.StartDate <= d && y.EndDate >= d, ct);
-        if (fy is null)
-            throw new InvalidOperationException("Voucher date must fall within a financial year.");
-        return fy;
+        return yearForDate;
     }
+
+    private async Task EnsureDateNotInClosedYearAsync(int companyId, DateTime date, CancellationToken ct)
+    {
+        var yearForDate = await FindYearContainingDateAsync(companyId, NormalizeDate(date), ct);
+        if (yearForDate?.IsClosed == true)
+            throw new InvalidOperationException("Financial year is closed.");
+    }
+
+    private Task<FinancialYear?> FindYearContainingDateAsync(int companyId, DateTime date, CancellationToken ct)
+        => _db.FinancialYears.FirstOrDefaultAsync(
+            y => y.CompanyId == companyId && y.StartDate <= date && y.EndDate >= date, ct);
 
     private async Task EnsureNotLockedAsync(int companyId, DateTime date, CancellationToken ct)
     {
