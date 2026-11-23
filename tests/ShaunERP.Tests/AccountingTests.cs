@@ -89,6 +89,51 @@ public class AccountingTests
     }
 
     [Fact]
+    public async Task Overlapping_FinancialYear_Is_Rejected_And_Adjacent_Year_Is_Accepted()
+    {
+        var (db, _, posting, accounting, _) = await CreateAsync();
+        await accounting.EnsureBootstrapAsync();
+        var existing = await db.FinancialYears.FirstAsync(y => y.CompanyId == 1);
+
+        var overlap = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            accounting.CreateFinancialYearAsync(new FinancialYear
+            {
+                Name = existing.Name,
+                StartDate = existing.StartDate,
+                EndDate = existing.EndDate,
+                IsCurrent = true
+            }));
+        Assert.Contains("overlap", overlap.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, await db.FinancialYears.CountAsync(y => y.CompanyId == 1));
+
+        var nextStart = existing.EndDate.Date.AddDays(1);
+        var next = await accounting.CreateFinancialYearAsync(new FinancialYear
+        {
+            Name = $"{nextStart.Year}-{nextStart.Year + 1}",
+            StartDate = nextStart,
+            EndDate = nextStart.AddYears(1).AddDays(-1),
+            IsCurrent = true
+        });
+        Assert.True(next.IsCurrent);
+        Assert.False((await db.FinancialYears.FirstAsync(y => y.Id == existing.Id)).IsCurrent);
+
+        var bank = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.BankDefault);
+        var capital = await db.Ledgers.FirstAsync(l => l.SystemCode == SystemLedgerCodes.Capital);
+        var voucher = await posting.PostAsync(new AccountingPostingRequest
+        {
+            TransactionDate = nextStart.AddDays(5),
+            VoucherTypeCode = SystemVoucherTypeCodes.Journal,
+            Lines =
+            [
+                new() { LedgerId = bank.Id, Debit = 100 },
+                new() { LedgerId = capital.Id, Credit = 100 }
+            ]
+        });
+        Assert.Equal(VoucherStatus.Posted, voucher.VoucherStatus);
+        Assert.Equal(next.Id, voucher.FinancialYearId);
+    }
+
+    [Fact]
     public async Task Reversal_Creates_Opposite_Entries_And_Duplicate_Source_Is_Idempotent()
     {
         var (db, _, posting, accounting, _) = await CreateAsync();

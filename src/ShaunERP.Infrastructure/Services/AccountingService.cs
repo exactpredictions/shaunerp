@@ -378,15 +378,25 @@ public sealed class AccountingService : IAccountingService
     {
         EnsureAccess(Permissions.AccountingFinancialYearManage);
         var companyId = RequireCompanyId();
-        if (year.EndDate <= year.StartDate)
+        var start = year.StartDate.Date;
+        var end = year.EndDate.Date;
+        if (end <= start)
             throw new InvalidOperationException("Financial year end date must be after start date.");
+
+        var overlaps = await _db.FinancialYears.AnyAsync(
+            y => y.CompanyId == companyId && y.StartDate <= end && start <= y.EndDate, ct);
+        if (overlaps)
+        {
+            throw new InvalidOperationException(
+                "Financial year dates overlap an existing year. Years must be contiguous and non-overlapping.");
+        }
 
         var entity = new FinancialYear
         {
             CompanyId = companyId,
             Name = year.Name.Trim(),
-            StartDate = year.StartDate.Date,
-            EndDate = year.EndDate.Date,
+            StartDate = start,
+            EndDate = end,
             IsCurrent = year.IsCurrent,
             CreatedDate = DateTime.UtcNow
         };
