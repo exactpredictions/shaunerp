@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using ShaunERP.Core.Crm;
+using ShaunERP.Core.Finance;
 using ShaunERP.Core.Identity;
 using ShaunERP.Core.ImportExport;
 using ShaunERP.Core.Platform;
@@ -61,12 +63,10 @@ public sealed class ProductionInitializationService : IProductionInitializationS
                 .Where(c => c.CompanyId == companyId && (c.Tags!.Contains(DemoTag) || (c.AccountNumber != null && c.AccountNumber.StartsWith("CUST-DEMO-"))))
                 .Select(c => $"Customer:{c.AccountNumber}:{c.CompanyName}")
                 .Take(10).ToListAsync(ct));
-            samples.AddRange(await _db.Leads.AsNoTracking()
-                .Where(l => l.CompanyId == companyId && (l.Tags!.Contains(DemoTag) || (l.Email != null && l.Email.StartsWith("demo.lead."))))
+            samples.AddRange(await DemoLeads(_db.Leads.AsNoTracking(), companyId)
                 .Select(l => $"Lead:{l.Email}")
                 .Take(10).ToListAsync(ct));
-            samples.AddRange(await _db.Invoices.AsNoTracking()
-                .Where(i => i.CompanyId == companyId && (i.InvoiceNumber.StartsWith("DEMO-INV-") || (i.Notes != null && i.Notes.Contains(DemoTag))))
+            samples.AddRange(await DemoInvoices(_db.Invoices.AsNoTracking(), companyId)
                 .Select(i => $"Invoice:{i.InvoiceNumber}")
                 .Take(10).ToListAsync(ct));
             samples.AddRange(await _db.CrmProducts.AsNoTracking()
@@ -101,14 +101,7 @@ public sealed class ProductionInitializationService : IProductionInitializationS
         try
         {
             // Payments -> invoice lines -> invoices linked to demo
-            var demoInvoiceIds = await _db.Invoices
-                .Where(i => i.CompanyId == companyId &&
-                            (i.InvoiceNumber.StartsWith("DEMO-INV-") ||
-                             i.InvoiceNumber.StartsWith("DEMO-") ||
-                             (i.Notes != null && (
-                                 i.Notes.Contains(DemoTag) ||
-                                 i.Notes.ToLower().Contains("seeded demo") ||
-                                 i.Notes.ToLower().Contains("demo invoice")))))
+            var demoInvoiceIds = await DemoInvoices(_db.Invoices, companyId)
                 .Select(i => i.Id)
                 .ToListAsync(ct);
             if (demoInvoiceIds.Count > 0)
@@ -380,12 +373,7 @@ public sealed class ProductionInitializationService : IProductionInitializationS
         deleted += await _db.Opportunities.Where(x => x.CompanyId == companyId && ((x.DealName != null && x.DealName.StartsWith("DEMO:")) || (x.Tags != null && x.Tags.Contains(DemoTag)))).ExecuteDeleteAsync(ct);
         deleted += await _db.Contacts.Where(x => x.CompanyId == companyId && x.Tags != null && x.Tags.Contains(DemoTag)).ExecuteDeleteAsync(ct);
         deleted += await _db.Prospects.Where(x => x.CompanyId == companyId && ((x.Email != null && x.Email.StartsWith("demo.prospect.")) || (x.Tags != null && x.Tags.Contains(DemoTag)))).ExecuteDeleteAsync(ct);
-        deleted += await _db.Leads.Where(x => x.CompanyId == companyId && (
-            (x.Email != null && x.Email.StartsWith("demo.lead.")) ||
-            (x.Email != null && x.Email.EndsWith(".example")) ||
-            (x.Tags != null && x.Tags.Contains(DemoTag)) ||
-            x.CompanyName == "Chennai Retail Pvt Ltd" ||
-            x.CompanyName == "Roja Combines")).ExecuteDeleteAsync(ct);
+        deleted += await DemoLeads(_db.Leads, companyId).ExecuteDeleteAsync(ct);
         deleted += await _db.CrmCustomers.Where(x => x.CompanyId == companyId && ((x.AccountNumber != null && x.AccountNumber.StartsWith("CUST-DEMO-")) || (x.Tags != null && x.Tags.Contains(DemoTag)))).ExecuteDeleteAsync(ct);
         deleted += await _db.CrmAccounts.Where(x => x.CompanyId == companyId && ((x.AccountNumber != null && x.AccountNumber.StartsWith("DEMO-ACC-")) || (x.Tags != null && x.Tags.Contains(DemoTag)))).ExecuteDeleteAsync(ct);
         deleted += await _db.Campaigns.Where(x => x.CompanyId == companyId && (x.Name.StartsWith("DEMO:") || (x.Description != null && x.Description.Contains(DemoTag)))).ExecuteDeleteAsync(ct);
@@ -400,12 +388,22 @@ public sealed class ProductionInitializationService : IProductionInitializationS
         return
         [
             new DemoDataCount { EntityType = "customers.tagged_or_prefix", Count = await _db.CrmCustomers.CountAsync(c => c.CompanyId == id && ((c.Tags != null && c.Tags.Contains(DemoTag)) || (c.AccountNumber != null && c.AccountNumber.StartsWith("CUST-DEMO-"))), ct) },
-            new DemoDataCount { EntityType = "leads.tagged_or_prefix", Count = await _db.Leads.CountAsync(l => l.CompanyId == id && ((l.Tags != null && l.Tags.Contains(DemoTag)) || (l.Email != null && l.Email.StartsWith("demo.lead."))), ct) },
+            new DemoDataCount { EntityType = "leads.tagged_or_prefix", Count = await DemoLeads(_db.Leads, id).CountAsync(ct) },
             new DemoDataCount { EntityType = "products.prefix", Count = await _db.CrmProducts.CountAsync(p => p.CompanyId == id && p.ProductCode.StartsWith("DEMO-"), ct) },
-            new DemoDataCount { EntityType = "invoices.prefix_or_notes", Count = await _db.Invoices.CountAsync(i => i.CompanyId == id && (i.InvoiceNumber.StartsWith("DEMO-INV-") || (i.Notes != null && i.Notes.Contains(DemoTag))), ct) },
+            new DemoDataCount { EntityType = "invoices.prefix_or_notes", Count = await DemoInvoices(_db.Invoices, id).CountAsync(ct) },
             new DemoDataCount { EntityType = "opportunities.tagged_or_prefix", Count = await _db.Opportunities.CountAsync(o => o.CompanyId == id && ((o.DealName != null && o.DealName.StartsWith("DEMO:")) || (o.Tags != null && o.Tags.Contains(DemoTag))), ct) }
         ];
     }
+
+    internal static IQueryable<Lead> DemoLeads(IQueryable<Lead> source, int companyId) =>
+        source.Where(x => x.CompanyId == companyId && (
+            (x.Email != null && x.Email.StartsWith("demo.lead.")) ||
+            (x.Tags != null && x.Tags.Contains(DemoTag))));
+
+    internal static IQueryable<Invoice> DemoInvoices(IQueryable<Invoice> source, int companyId) =>
+        source.Where(i => i.CompanyId == companyId &&
+                          (i.InvoiceNumber.StartsWith("DEMO-INV-") ||
+                           (i.Notes != null && i.Notes.Contains(DemoTag))));
 
     private async Task<Company?> ResolveTargetCompanyAsync(CancellationToken ct)
     {

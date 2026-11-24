@@ -24,4 +24,7 @@
   <ItemGroup>
     <ProjectReference Include="..\ShaunERP.Core\ShaunERP.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="ShaunERP.Tests" />
+  </ItemGroup>
 </Project>
