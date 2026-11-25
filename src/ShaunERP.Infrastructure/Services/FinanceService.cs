@@ -252,8 +252,15 @@ public class FinanceService : IFinanceService
             invoice.CurrencyCode = book.Currency;
         if (string.IsNullOrWhiteSpace(invoice.PaymentTerms))
             invoice.PaymentTerms = book.DefaultPaymentTerms;
-        if (invoice.InvoiceStatus == default && !invoice.IsPaid)
-            invoice.InvoiceStatus = InvoiceStatus.Draft;
+
+        // Create is draft-only. A POST of a copied invoice otherwise keeps Paid/Sent,
+        // AmountPaid, nested payments, and AccountingVoucherId — which skips Mark sent
+        // / Record payment and can reverse someone else's sales voucher on void.
+        invoice.InvoiceStatus = InvoiceStatus.Draft;
+        invoice.IsPaid = false;
+        invoice.AmountPaid = 0;
+        invoice.AccountingVoucherId = null;
+        invoice.Payments = new List<InvoicePayment>();
 
         invoice.PurchaseOrderNumber = string.IsNullOrWhiteSpace(invoice.PurchaseOrderNumber)
             ? null : invoice.PurchaseOrderNumber.Trim();
