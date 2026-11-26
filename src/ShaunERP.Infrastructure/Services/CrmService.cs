@@ -828,19 +828,25 @@ public partial class CrmService : ICrmService
         EnsureCrmAccess(Permissions.CrmOpportunitiesUpdate);
         var deal = await FindOwnedAsync(_db.Opportunities, opportunityId, ct);
         if (deal is null) return (false, "Opportunity not found.", null);
-        if (deal.Stage == "Closed Won" && deal.CustomerId is not null)
+
+        // A deal can already have a bill-to from CRM (upsell, demo seed, CSV). Creating
+        // another Customer on Mark won splits AR across duplicate masters.
+        if (deal.CustomerId is int linkedCustomerId)
         {
-            var existing = await GetCustomerAsync(deal.CustomerId.Value, ct);
-            return (true, null, existing);
+            var linked = await GetCustomerAsync(linkedCustomerId, ct);
+            if (linked is not null)
+            {
+                MarkDealWon(deal, winReason);
+                deal.PartyId ??= linked.PartyId;
+                deal.AccountId ??= linked.AccountId;
+                await _db.SaveChangesAsync(ct);
+                return (true, null, linked);
+            }
+
+            deal.CustomerId = null;
         }
 
-        deal.Stage = "Closed Won";
-        deal.Probability = 100;
-        deal.ForecastCategory = "Closed";
-        deal.ActualCloseDate = DateTime.UtcNow;
-        deal.ActualRevenue ??= deal.Amount;
-        deal.WinLossReason = winReason ?? deal.WinLossReason;
-        deal.ExpectedRevenue = deal.Amount;
+        MarkDealWon(deal, winReason);
 
         Account? account = null;
         if (deal.AccountId is int accountId)
@@ -1255,6 +1261,17 @@ public partial class CrmService : ICrmService
             DateTimeKind.Local => dt.ToUniversalTime(),
             _ => DateTime.SpecifyKind(dt, DateTimeKind.Utc)
         };
+    }
+
+    private static void MarkDealWon(Opportunity deal, string? winReason)
+    {
+        deal.Stage = "Closed Won";
+        deal.Probability = 100;
+        deal.ForecastCategory = "Closed";
+        deal.ActualCloseDate = DateTime.UtcNow;
+        deal.ActualRevenue ??= deal.Amount;
+        deal.WinLossReason = winReason ?? deal.WinLossReason;
+        deal.ExpectedRevenue = deal.Amount;
     }
 
     private static void ApplyStageProbability(Opportunity deal)
